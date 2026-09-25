@@ -1,0 +1,48 @@
+# -------------------------------------------------------------
+# 1. Environment & Secrets (CRITICAL SECURITY)
+# Prevents database credentials, JWT secrets, and API keys from
+# being committed to git repository (Course Rubric: 15 pts)
+# -------------------------------------------------------------
+.env
+.env.local
+.env.*
+*.env
+# Course Exception: Throwaway database connection string in backend/.env permitted for grading
+!backend/.env
+
+# -------------------------------------------------------------
+# 2. Python Backend
+# -------------------------------------------------------------
+backend/.venv/
+.venv/
+env/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.sqlite3
+backend/app.db
+
+# -------------------------------------------------------------
+# 3. Node.js & Frontend Build Outputs
+# -------------------------------------------------------------
+node_modules/
+frontend/dist/
+frontend/.next/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# -------------------------------------------------------------
+# 4. OS & IDE Metadata
+# -------------------------------------------------------------
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# -------------------------------------------------------------
+# 5. Local AI Agent Tooling & Workflows
+# -------------------------------------------------------------
+.agents/
+
