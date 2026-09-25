@@ -7,7 +7,10 @@
 .env.local
 .env.*
 *.env
-# Course Exception: Throwaway database connection string in backend/.env permitted for grading
+# Course Requirements: Template listing all environment variables and throwaway DB
+!.env.example
+!*.env.example
+!backend/.env.example
 !backend/.env
 
 # -------------------------------------------------------------
