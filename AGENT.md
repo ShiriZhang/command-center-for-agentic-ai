@@ -43,24 +43,22 @@ Analyzing the full execution trace and network telemetry of **Run 1** (total ela
 
 | Service / Endpoint | Destination Host | Number of Round Trips | Average Latency per Round Trip | Total Cumulative Latency | Purpose |
 | :--- | :--- | :---: | :---: | :---: | :--- |
-| **LLM Inference** | `openrouter.ai` | **13** | 4.38 s | ~57.0 s | Agent reasoning steps (9 turns) + Tier 2 fuzzy semantic deduplication checks (4 calls). |
-| **Candidate Discovery API** | `aidevboard.com` | **22** | 0.48 s | ~10.5 s | Seed candidate queries executed concurrently with search invocations. |
-| **Article Fetches (HTTP/TLS)** | Multi-host career portals | **9** | 1.82 s | ~16.4 s | Fetching and scraping raw HTML job descriptions (Anduril, NVIDIA, Scale AI, Harvey, Quora, FastAIJobs). |
-| **HTTP Redirect Hops** | `aijobsmap.com` → `jobspipe.dev` | **2** | 0.42 s | ~0.8 s | Hop-by-hop redirect inspection with per-hop DNS pre-resolution. |
+| **LLM Inference** | `openrouter.ai` | **13** | 4.15 s | ~54.0 s | Agent reasoning steps (10 step completions) + Tier 2 fuzzy semantic deduplication checks (3 calls). |
+| **Search & Discovery API** | `tavily.com` / Candidate feeds | **18** | 1.85 s | ~33.3 s | `search_web` queries across verified ATS portals and candidate feeds. |
+| **Article Fetches (HTTP/TLS)** | Multi-host career portals | **7** | 0.32 s | ~2.2 s | Fetching and scraping verified job descriptions (Fast AI Jobs, JobRight, Scale AI, RecentlyPostedJobs, etc.). |
 | **A1 Platform Backend** | `localhost:8000` | **2** | 0.05 s | ~0.1 s | `POST /api/auth/login` (JWT authentication) and `POST /api/tracker/runs` (Neon PostgreSQL persistence). |
-| **Total Transactions** | | **48** | | **~84.8 s** (Active network time) | *(Remaining ~9.8s was local CPU parsing, BeautifulSoup extraction, and regex tokenization)* |
+| **Total Transactions** | | **40** | | **~89.6 s** (Active network time) | *(Remaining ~5.1s was local CPU parsing, BeautifulSoup extraction, and regex tokenization)* |
 
 ### Where Did the Time Go?
 
-1. **67.2% — Upstream LLM Generation Time (`openrouter.ai`):**
+1. **60.3% — Upstream LLM Generation Time (`openrouter.ai`):**
    - The primary latency bottleneck was remote autoregressive token generation and Time to First Token (TTFT) on `qwen/qwen3.8-27b:free`.
-   - As the agent's observation history accumulated across steps 1 through 9, prompt size grew from 1,201 tokens to 117,778 tokens. Due to quadratic attention key-value cache processing, later steps took 8–11 seconds per completion.
-2. **19.3% — Corporate Web Ingestion & TLS Handshakes:**
-   - Career sites hosted behind enterprise CDNs (e.g., `jobs.nvidia.com`, `scale.com`, `fastaijobs.com`) serve multi-megabyte JavaScript bundles.
-   - Even though our `fetch_article` tool limits responses to 1MB and streams headers first, TLS 1.3 handshakes and initial TCP slow-start round trips to diverse global CDNs consumed ~1.5–2.5 seconds per fetch.
-3. **12.4% — Candidate Seeding REST Round Trips (`aidevboard.com`):**
-   - 22 parallel REST calls to `https://aidevboard.com/api/v1/jobs?per_page=50` took ~400–600ms per request.
-4. **< 1.1% — Local Backend & Database Persistence:**
+   - As the agent's observation history accumulated across steps 1 through 10, prompt size grew from 1,265 tokens to 121,580 tokens. Due to quadratic attention key-value cache processing, later steps took 8–11 seconds per completion.
+2. **37.2% — Search & Candidate Discovery API Latency (`tavily.com`):**
+   - 18 search API calls were issued across Greenhouse, Lever, Ashby, and specialized career domains, averaging ~1.85s per network round trip.
+3. **2.4% — Corporate Web Ingestion & TLS Handshakes:**
+   - Career sites hosted behind enterprise CDNs served HTML job descriptions. While our `fetch_article` tool limits responses to 1MB and inspects DNS hops safely, TLS 1.3 handshakes and initial TCP round trips consumed ~0.32s per fetch.
+4. **< 0.1% — Local Backend & Database Persistence:**
    - Local FastAPI routes and connection-pooled Neon PostgreSQL database operations completed in <100ms total.
 
 ---
@@ -140,40 +138,120 @@ When an HTTP 429 occurs, our system distinguishes between **transient per-minute
 
 ### Exact Code Quote from `tracker/llm.py`
 
-#### 1. Failure Classification (Lines 142–174):
+#### 1. Failure Classification (`classify_error` in `tracker/llm.py`, Lines 143–200):
 ```python
-        # Check for transient rate limit (HTTP 429)
-        if status_code == 429 or "rate limit" in err_msg_lower or "too many requests" in err_msg_lower:
-            # Check if this is a daily quota exhaustion (terminal) vs transient per-minute rate limit
-            is_daily_quota = any(kw in err_msg_lower for kw in [
-                "daily quota", "quota exceeded", "monthly quota",
-                "insufficient credits", "credit balance", "limit reached for today"
-            ])
-            if is_daily_quota:
-                raise TerminalLLMError(
-                    f"Daily/monthly quota or credit limit exhausted on '{provider_name}': {err_msg}"
-                )
-            raise TransientLLMError(f"Rate limit exceeded (HTTP 429), retryable: {err_msg}")
+def classify_error(err: Exception) -> Tuple[bool, str, Optional[int]]:
+    """
+    Classifies an upstream LLM exception into:
+        (is_terminal: bool, reason: str, status_code: Optional[int])
+        
+    Terminal Criteria (Zero Retries):
+    - HTTP 401: AuthenticationError (Invalid/Missing API Key)
+    - HTTP 402: Payment Required / Insufficient Credits
+    - HTTP 403: Permission Denied
+    - HTTP 404: NotFoundError (Model removed or unavailable)
+    - RateLimitError (429) containing account quota exhaustion keywords ('quota', 'credit', 'billing', 'insufficient_quota')
+    
+    Transient Criteria (Exponential Backoff):
+    - RateLimitError (429 per-minute rate limit without account exhaustion)
+    - APITimeoutError / APIConnectionError (TCP socket timeout / connection dropped)
+    - InternalServerError (HTTP 500, 502, 503, 504)
+    """
+    status_code = getattr(err, "status_code", None)
+    err_str = str(err).lower()
+
+    # 1. Explicit Terminal Status Codes
+    if isinstance(err, AuthenticationError) or status_code == 401:
+        return True, "Invalid or unauthorized API key (HTTP 401)", 401
+
+    if status_code == 402:
+        return True, "Payment required or credit balance exhausted (HTTP 402)", 402
+
+    if isinstance(err, PermissionDeniedError) or status_code == 403:
+        return True, "Permission denied (HTTP 403)", 403
+
+    if isinstance(err, NotFoundError) or status_code == 404:
+        return True, f"Model or resource not found (HTTP 404): {err}", 404
+
+    # 2. Check for Account Quota Exhaustion masquerading as 429
+    quota_keywords = ["quota", "credit", "billing", "insufficient_quota", "exceeded your current quota", "balance is too low", "insufficient funds"]
+    if any(kw in err_str for kw in quota_keywords):
+        return True, f"Account quota or credit limit exhausted: {err}", status_code or 429
+
+    # 3. Standard 429 Rate Limit (Transient per-minute throttle)
+    if isinstance(err, RateLimitError) or status_code == 429:
+        return False, "Rate limit exceeded (HTTP 429), retryable", 429
+
+    # 4. Network and Gateway Transient Errors
+    if isinstance(err, (APITimeoutError, APIConnectionError)):
+        return False, f"Network connection / timeout error ({type(err).__name__})", status_code
+
+    if isinstance(err, InternalServerError) or (status_code and 500 <= status_code < 600):
+        return False, f"Upstream server error (HTTP {status_code})", status_code
+
+    # Generic unclassified status error
+    if isinstance(err, APIStatusError):
+        if status_code and status_code < 500:
+            return True, f"Client API error (HTTP {status_code}): {err}", status_code
+        return False, f"Server API error (HTTP {status_code}): {err}", status_code
+
+    # Fallback: treat unexpected Python exceptions as terminal
+    return True, f"Unexpected error: {err}", status_code
 ```
 
-#### 2. Exponential Backoff with Full Jitter (Lines 198–221):
+#### 2. Fail-Fast vs. Exponential Backoff with Jitter (`LLMClient.create_completion`, Lines 308–367):
 ```python
-            except TransientLLMError as transient_err:
-                retries += 1
-                if retries > self.max_retries:
-                    logger.error(
-                        f"Exceeded maximum transient retries ({self.max_retries}) on '{provider_name}': {transient_err}"
-                    )
-                    raise
-                # Exponential backoff with jitter
-                delay = min(self.max_backoff, self.initial_backoff * (2 ** (retries - 1)))
-                jitter = random.uniform(0, 0.5 * delay)
-                total_delay = round(delay + jitter, 2)
+        attempt = 0
+        while attempt <= self.max_retries:
+            try:
+                self.call_count += 1
+                response = self.client.chat.completions.create(**kwargs)
+                ...
+                return response
+
+            except Exception as exc:
+                is_terminal, reason, status_code = classify_error(exc)
+
+                # Requirement 5: Terminal failures halt immediately with ZERO retries
+                if is_terminal:
+                    logger.error(f"[TERMINAL LLM FAILURE] Provider '{self.provider}' halted: {reason}")
+                    raise TerminalLLMError(
+                        f"[TERMINAL FAILURE] {reason}",
+                        status_code=status_code,
+                        provider=self.provider,
+                        details={"original_error": str(exc)}
+                    ) from exc
+
+                # Transient failure: check retry budget
+                attempt += 1
+                if attempt > self.max_retries:
+                    # Attempt failover to secondary provider if configured
+                    if self.enable_fallback:
+                        fallback_data = self._get_fallback_client()
+                        if fallback_data:
+                            fb_client, fb_model = fallback_data
+                            logger.warning(
+                                f"Exhausted {self.max_retries} retries on '{self.provider}'. "
+                                f"Failing over to fallback provider with model '{fb_model}'..."
+                            )
+                            kwargs["model"] = fb_model
+                            try:
+                                return fb_client.chat.completions.create(**kwargs)
+                            except Exception as fb_exc:
+                                logger.error(f"Fallback provider also failed: {fb_exc}")
+
+                    raise TransientLLMError(
+                        f"Transient error exceeded maximum retries ({self.max_retries}): {exc}",
+                        status_code=status_code
+                    ) from exc
+
+                # Exponential backoff with random jitter
+                backoff = min(20.0, self.base_delay * (2 ** (attempt - 1)) + random.uniform(0.1, 0.5))
                 logger.warning(
-                    f"Transient failure on '{provider_name}' ({transient_err}). "
-                    f"Backing off for {total_delay}s (Attempt {retries}/{self.max_retries})..."
+                    f"Transient failure on '{self.provider}' ({reason}). "
+                    f"Backing off for {backoff:.2f}s (Attempt {attempt}/{self.max_retries})..."
                 )
-                time.sleep(total_delay)
+                time.sleep(backoff)
 ```
 
 ### How Behavior Differs: Per-Minute Limit vs. Daily Cap

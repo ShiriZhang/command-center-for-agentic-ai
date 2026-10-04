@@ -1,11 +1,11 @@
 # -------------------------------------------------------------
-# Web Framework & ASGI Server
+# Core Web Framework & ASGI Server (Assignment 1A)
 # -------------------------------------------------------------
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 
 # -------------------------------------------------------------
-# Database & ORM
+# Database ORM & PostgreSQL Drivers (Neon Serverless)
 # -------------------------------------------------------------
 sqlalchemy>=2.0.30
 psycopg2-binary>=2.9.9
@@ -17,23 +17,29 @@ psycopg[binary]>=3.1.0
 pydantic>=2.8.0
 
 # -------------------------------------------------------------
-# Security & Cryptography
+# Security & Cryptography (Pillar 1 Auth)
 # -------------------------------------------------------------
 bcrypt>=4.2.0
 pyjwt>=2.9.0
 
 # -------------------------------------------------------------
-# Environment & Testing
+# Network Clients & Environment
 # -------------------------------------------------------------
 python-dotenv>=1.0.1
 httpx>=0.27.0
-pytest>=8.0.0
-anyio>=4.0.0
+requests>=2.31.0
 
 # -------------------------------------------------------------
-# Agentic Tracker Dependencies (Assignment 1B)
+# Autonomous Agentic Tracker & Web Tools (Assignment 1B)
 # -------------------------------------------------------------
 pyyaml>=6.0.1
 beautifulsoup4>=4.12.0
 tavily-python>=0.8.0
 openai>=1.40.0
+tiktoken>=0.7.0
+
+# -------------------------------------------------------------
+# Testing & Verification Harness
+# -------------------------------------------------------------
+pytest>=8.0.0
+anyio>=4.0.0

@@ -71,6 +71,21 @@ class TestFrontendTrackerView(unittest.TestCase):
         self.assertIn("primary_url", self.content, "Missing primary_url field binding")
         self.assertIn('rel="noopener noreferrer"', self.content, "Links must have rel='noopener noreferrer' for safety")
 
+    def test_audit_table_article_title_column(self):
+        """
+        Verify presence of Article Title column in Network Fetch Audit Log table (Requirement 13).
+        """
+        self.assertIn("Article Title", self.content, "Missing Article Title column in Network Fetch Audit Log table")
+        self.assertIn("art.title", self.content, "Missing art.title field binding in table rows")
+
+    def test_skipped_cached_badge_rendered(self):
+        """
+        Verify Requirement 7 & 11: Dedicated [SKIPPED - CACHED] status badge is rendered
+        for articles with status 'skipped as already seen'.
+        """
+        self.assertIn("[SKIPPED - CACHED]", self.content, "Missing [SKIPPED - CACHED] badge in audit table")
+        self.assertIn("skipped as already seen", self.content, "Missing 'skipped as already seen' branch handling")
+
 
 if __name__ == "__main__":
     unittest.main()

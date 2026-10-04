@@ -65,7 +65,6 @@ BACKEND_URL=http://localhost:8000
 #### Terminal 1 — Start the Backend Server (Port 8000)
 From the project root:
 ```bash
-cd backend
 python -m venv .venv
 
 # On Windows (PowerShell):
@@ -73,8 +72,11 @@ python -m venv .venv
 # On macOS / Linux:
 # source .venv/bin/activate
 
+# Install all project dependencies (includes backend, agent tracker, and testing tools)
 pip install -r requirements.txt
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+# Run backend API server
+uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 *The backend API will be live at `http://localhost:8000` (Swagger docs at `http://localhost:8000/docs`).*
 
@@ -250,11 +252,15 @@ python scripts/test_tracker.py
 ```
 *Expected output: `ALL PILLARS VERIFIED SUCCESSFULLY [PASS] ✓`*
 
-### 2. Run Complete Unit & Integration Test Suite (64 Tests)
+### 2. Run Complete Unit & Integration Test Suite (69 Tests)
 ```bash
+# Using pytest (Recommended):
+pytest tests/ -v
+
+# Or using unittest runner:
 python -m unittest discover tests -v
 ```
-*Runs all 64 unit tests covering configuration, SSRF guardrails, search tools, LLM retry backoffs, agent state machine, recrawl memory, backend routes, and frontend views.*
+*Runs all 69 unit and integration tests covering configuration, SSRF guardrails, search tools, LLM retry backoffs, agent state machine, telemetry traces, recrawl memory, backend routes, and frontend views.*
 
 ---
 

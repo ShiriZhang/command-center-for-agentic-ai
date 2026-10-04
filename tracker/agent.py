@@ -48,7 +48,8 @@ class ResearchAgent:
     def __init__(
         self,
         config: Optional[TrackerConfig] = None,
-        llm_client: Optional[LLMClient] = None
+        llm_client: Optional[LLMClient] = None,
+        previous_urls: Optional[Set[str]] = None
     ):
         self.config = config or default_config
         self.llm = llm_client or default_client
@@ -65,6 +66,7 @@ class ResearchAgent:
         self.start_time: float = 0.0
 
         # Memory and trace
+        self.previous_urls: Set[str] = set(previous_urls or [])
         self.visited_urls: Set[str] = set()
         self.fetched_articles: List[Dict[str, Any]] = []
         self.search_history: List[Dict[str, Any]] = []
@@ -100,17 +102,59 @@ class ResearchAgent:
             "5. Structure the report in clean GitHub Flavored Markdown with job title, company, URL, location, and requirements."
         )
 
-    def _log_trace(self, action: str, action_input: Any, observation: Any, thought: str = "") -> None:
-        """Records an atomic research step in the auditable execution trace."""
+    def _log_trace(
+        self,
+        action: str,
+        action_input: Any,
+        observation: Any,
+        thought: str = "",
+        status: Optional[str] = None,
+        latency: Optional[float] = None
+    ) -> None:
+        """Records an atomic research step or tool invocation in the auditable execution trace (Requirement 13)."""
         elapsed = round(time.time() - self.start_time, 2)
+        inferred_status = status or ("error" if "error" in action.lower() or (isinstance(observation, dict) and "error" in observation and observation.get("error")) else "success")
         record = {
             "step": self.step_count,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "elapsed_seconds": elapsed,
-            "thought": thought,
+            "tool": action,
             "action": action,
+            "arguments": action_input,
             "action_input": action_input,
+            "status": inferred_status,
+            "latency": latency if latency is not None else 0.0,
+            "tokens": {"cumulative": self.llm.cumulative_total_tokens},
+            "thought": thought,
             "observation": observation,
+            "cumulative_tokens": self.llm.cumulative_total_tokens,
+            "fetch_count": self.fetch_count
+        }
+        self.trace.append(record)
+
+    def _log_model_call(
+        self,
+        step: int,
+        arguments: Dict[str, Any],
+        status: str,
+        latency: float,
+        tokens: Dict[str, int],
+        error: Optional[str] = None
+    ) -> None:
+        """Records an LLM model completion call in the auditable execution trace (Requirement 13)."""
+        elapsed = round(time.time() - self.start_time, 2)
+        record = {
+            "step": step,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "elapsed_seconds": elapsed,
+            "tool": "model",
+            "action": "model",
+            "arguments": arguments,
+            "action_input": arguments,
+            "status": status,
+            "latency": latency,
+            "tokens": tokens,
+            "observation": f"Model completion {status} in {latency}s" if not error else f"Model error: {error}",
             "cumulative_tokens": self.llm.cumulative_total_tokens,
             "fetch_count": self.fetch_count
         }
@@ -153,6 +197,25 @@ class ResearchAgent:
 
         elif tool_name == "fetch_article":
             url = args.get("url", "")
+            # Requirement 7 & 11: Intercept URLs seen in previous runs (recrawl memory cache guard)
+            norm_previous = {u.rstrip("/") for u in self.previous_urls}
+            if url and (url in self.previous_urls or url.rstrip("/") in norm_previous):
+                logger.info(f"URL '{url}' skipped as already seen in previous crawl run.")
+                cached_res = {
+                    "url": url,
+                    "current_url": url,
+                    "title": "Cached Article",
+                    "content": "",
+                    "status": "skipped as already seen",
+                    "error": "URL was already inspected in a previous crawl run; skipped.",
+                    "error_message": "URL was already inspected in a previous crawl run; skipped.",
+                    "byte_size": 0,
+                    "fetch_time_ms": 0.0
+                }
+                self.visited_urls.add(url)
+                self.fetched_articles.append(cached_res)
+                return cached_res, False
+
             if self.fetch_count >= self.max_fetches:
                 return {
                     "status": "rejected",
@@ -251,9 +314,11 @@ class ResearchAgent:
         self.status = "running"
         self.halt_reason = None
         self.final_report = ""
+        if previous_urls is not None:
+            self.previous_urls = set(previous_urls)
 
         # Initialize conversation state
-        sys_prompt = self._build_system_prompt(previous_urls)
+        sys_prompt = self._build_system_prompt(self.previous_urls)
         self.messages = [
             {"role": "system", "content": sys_prompt},
             {
@@ -278,13 +343,35 @@ class ResearchAgent:
                 break
 
             # 2. DECIDE: Query LLM for next action
+            model_t0 = time.time()
             try:
                 response = self.llm.create_completion(
                     messages=self.messages,
                     tools=TRACKER_TOOLS,
                     tool_choice="auto"
                 )
+                model_latency = round(time.time() - model_t0, 2)
+                usage = getattr(response, "usage", None)
+                p_tok = (getattr(usage, "prompt_tokens", 0) or 0) if usage else 0
+                c_tok = (getattr(usage, "completion_tokens", 0) or 0) if usage else 0
+                t_tok = (getattr(usage, "total_tokens", 0) or (p_tok + c_tok)) if usage else (p_tok + c_tok)
+                self._log_model_call(
+                    step=self.step_count,
+                    arguments={"messages_count": len(self.messages), "tools_count": len(TRACKER_TOOLS)},
+                    status="success",
+                    latency=model_latency,
+                    tokens={"prompt_tokens": p_tok, "completion_tokens": c_tok, "total_tokens": t_tok}
+                )
             except TerminalLLMError as term_err:
+                model_latency = round(time.time() - model_t0, 2)
+                self._log_model_call(
+                    step=self.step_count,
+                    arguments={"messages_count": len(self.messages)},
+                    status="error",
+                    latency=model_latency,
+                    tokens={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                    error=str(term_err)
+                )
                 logger.error(f"Terminal LLM failure during agent step {self.step_count}: {term_err}")
                 self.status = "error"
                 self.halt_reason = str(term_err)
@@ -292,6 +379,15 @@ class ResearchAgent:
                 self._log_trace("terminal_error", {"error": str(term_err)}, "Agent terminated")
                 break
             except Exception as e:
+                model_latency = round(time.time() - model_t0, 2)
+                self._log_model_call(
+                    step=self.step_count,
+                    arguments={"messages_count": len(self.messages)},
+                    status="error",
+                    latency=model_latency,
+                    tokens={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+                    error=str(e)
+                )
                 logger.error(f"Unrecoverable LLM call error: {e}")
                 self.status = "error"
                 self.halt_reason = str(e)
@@ -350,7 +446,17 @@ class ResearchAgent:
                     t_args = {}
 
                 logger.info(f"[Step {self.step_count}] Executing tool '{t_name}' with args {t_args}")
+                tool_t0 = time.time()
                 obs_data, is_finish = self._execute_tool_call(t_name, t_args)
+                tool_latency = round(time.time() - tool_t0, 2)
+
+                # Infer granular tool execution status
+                if isinstance(obs_data, dict) and "status" in obs_data and obs_data["status"]:
+                    tool_status = obs_data["status"]
+                elif isinstance(obs_data, dict) and obs_data.get("error"):
+                    tool_status = "error"
+                else:
+                    tool_status = "success"
 
                 # Format observation back into messages for LLM context
                 obs_str = json.dumps(obs_data, ensure_ascii=False)
@@ -368,7 +474,9 @@ class ResearchAgent:
                     action=t_name,
                     action_input=t_args,
                     observation=obs_data if len(str(obs_data)) < 500 else f"Output length: {len(str(obs_data))} chars",
-                    thought=content
+                    thought=content,
+                    status=tool_status,
+                    latency=tool_latency
                 )
 
                 if is_finish:

@@ -15,7 +15,7 @@ This intelligence report compiles the **Top 10** newest entry-level and new grad
 - **Total Steps**: 10 / 15
 - **Article Fetches**: 7 / 12
 - **Tokens Consumed**: 121,580 / 100,000
-- **Generated At**: 2026-10-04 04:10:43 UTC
+- **Generated At**: 2026-10-02 10:10:43 UTC
 
 ---
 
@@ -117,6 +117,6 @@ This intelligence report compiles the **Top 10** newest entry-level and new grad
 Positions were discovered and cross-referenced from authorized corporate ATS portals (Greenhouse, Lever, Ashby) and developer candidate feeds.
 
 ```
-Audit Verification Timestamp: 2026-10-04 04:10:43 UTC
+Audit Verification Timestamp: 2026-10-02 10:10:43 UTC
 Zero-Trust SSRF Guardrail Status: ACTIVE (100% inspected)
 ```

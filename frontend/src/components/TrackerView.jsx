@@ -154,6 +154,15 @@ const SAMPLE_RUNS = [
         byte_size: 61400,
         fetch_time_ms: 310,
         error_message: null
+      },
+      {
+        id: 5,
+        url: "https://boards.greenhouse.io/scaleai/jobs/654123",
+        title: "Scale AI - Careers Portal",
+        status: "skipped as already seen",
+        byte_size: 0,
+        fetch_time_ms: 0,
+        error_message: "URL was already inspected in a previous crawl run; skipped."
       }
     ]
   },
@@ -629,6 +638,7 @@ export default function TrackerView() {
           <table className="w-full text-left text-xs">
             <thead>
               <tr className="border-b border-slate-800 text-slate-400">
+                <th className="pb-2.5 font-semibold">Article Title</th>
                 <th className="pb-2.5 font-semibold">Target URL</th>
                 <th className="pb-2.5 font-semibold">Guardrail Status</th>
                 <th className="pb-2.5 font-semibold">Payload Size</th>
@@ -639,8 +649,12 @@ export default function TrackerView() {
             <tbody className="divide-y divide-slate-800/60 text-slate-300">
               {(activeRun?.articles || []).map((art, i) => {
                 const isRejected = art.status === 'rejected';
+                const isSkipped = art.status === 'skipped as already seen';
                 return (
                   <tr key={art.id || i} className="hover:bg-slate-800/30 transition-colors">
+                    <td className="py-2.5 pr-3 max-w-xs truncate font-medium text-white" title={art.title || 'Untitled Source'}>
+                      {art.title || <span className="text-slate-500 italic">Untitled Source</span>}
+                    </td>
                     <td className="py-2.5 pr-3 max-w-xs truncate font-mono text-[11px] text-slate-300" title={art.url}>
                       {art.url}
                     </td>
@@ -649,6 +663,11 @@ export default function TrackerView() {
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">
                           <ShieldAlert className="w-3 h-3 text-rose-400" />
                           [SSRF BLOCKED]
+                        </span>
+                      ) : isSkipped ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-sky-500/10 text-sky-400 border border-sky-500/20">
+                          <Clock className="w-3 h-3 text-sky-400" />
+                          [SKIPPED - CACHED]
                         </span>
                       ) : (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
@@ -664,7 +683,11 @@ export default function TrackerView() {
                       {art.fetch_time_ms ? `${art.fetch_time_ms} ms` : '< 1 ms'}
                     </td>
                     <td className="py-2.5 text-slate-400">
-                      {art.error_message ? (
+                      {isSkipped ? (
+                        <span className="text-sky-400 font-mono text-[11px]">
+                          {art.error_message || "URL seen in previous run • 0 network I/O"}
+                        </span>
+                      ) : art.error_message ? (
                         <span className="text-rose-400 font-mono text-[11px]">{art.error_message}</span>
                       ) : (
                         <span className="text-slate-500">DNS pre-resolution passed • HTML extracted</span>
