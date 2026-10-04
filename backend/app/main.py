@@ -4,10 +4,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 
 from .database import engine, Base, SessionLocal
-from .models import User
+from .models import User, TrackerRun, TrackerArticle, TrackerDevelopment
 from .auth import hash_password
 from .schemas import HealthResponse
-from .routes import auth, users
+from .routes import auth, users, tracker
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -82,3 +83,5 @@ def healthz():
 # Mount Feature Routers
 app.include_router(auth.router)
 app.include_router(users.router)
+app.include_router(tracker.router)
+

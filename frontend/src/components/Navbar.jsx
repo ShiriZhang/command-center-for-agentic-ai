@@ -1,5 +1,5 @@
 import React from 'react';
-import { Layers, Home, User, LogOut, CheckCircle2 } from 'lucide-react';
+import { Layers, Home, Bot, User, LogOut, CheckCircle2 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 export default function Navbar({ currentTab, onSelectTab }) {
@@ -36,6 +36,18 @@ export default function Navbar({ currentTab, onSelectTab }) {
           >
             <Home className="w-3.5 h-3.5" />
             Home
+          </button>
+          <button
+            type="button"
+            onClick={() => onSelectTab('tracker')}
+            className={`flex items-center gap-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+              currentTab === 'tracker'
+                ? 'bg-emerald-600 text-white shadow-sm shadow-emerald-600/30'
+                : 'text-slate-400 hover:text-slate-200'
+            }`}
+          >
+            <Bot className="w-3.5 h-3.5" />
+            Intelligence Tracker
           </button>
           <button
             type="button"

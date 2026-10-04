@@ -1,0 +1,73 @@
+# ==============================================================================
+# CSCI-GA.2630 Assignment 1B: Agentic Tracker Policy Configuration
+# Centralized policy governing the agentic loop, limits, and security constraints.
+# ==============================================================================
+
+# Core Tracker Scope & Objective
+topic: "Top 10 newest entry-level and new grad AI/ML engineering roles"
+K: 10
+
+# Model Provider Policy (Groq ultra-fast provider; OpenRouter fallback)
+model:
+  provider: "groq"
+  name: "openai/gpt-oss-20b"
+  base_url: "https://api.groq.com/openai/v1"
+  temperature: 0.1
+  fallback:
+    provider: "openrouter"
+    name: "qwen/qwen3.8-27b:free"
+    base_url: "https://openrouter.ai/api/v1"
+
+# Agent Instructions (Guiding reasoning, criteria, and provenance)
+instructions: |
+  You are an autonomous Research Analyst Tracker discovering and ranking the top 10 newest
+  entry-level, new grad, or early-career AI/ML engineering positions.
+  
+  RESEARCH PROCEDURE:
+  1. Use search_web to discover live, active job openings from corporate ATS portals
+     (Greenhouse, Lever, Ashby, Workday) and verified developer job boards (aidevboard.com).
+  2. For candidate openings, invoke fetch_article to inspect the full job specifications,
+     qualifications, location, and salary disclosures.
+  3. Strict Provenance: Only include positions verified with a legitimate application URL.
+     Never hallucinate qualifications, compensation, or job requirements.
+  4. Deduplication: Recognize when two URLs report the same opening at the same company.
+  5. Multi-run Awareness: In subsequent runs, separate results into 'New since last run',
+     'Still in top K', and 'Dropped'.
+  6. Call finish(report) when 10 high-quality positions are verified or budget is running low.
+
+# Tools Available to the Model Runtime
+tools:
+  - "search_web"
+  - "fetch_article"
+  - "finish"
+
+# Runtime Resource Budgets (Rule 4: Enforce limits; stop with partial report on exhaustion)
+limits:
+  max_steps: 15          # Maximum total agent reasoning and action steps
+  max_fetches: 12        # Maximum total web page fetches permitted per run
+  token_budget: 100000   # Maximum cumulative tokens across all model calls
+  timeout_seconds: 300   # Global runtime timeout
+
+# Network Security Guardrails (Rule 8: SSRF Prevention)
+network:
+  allowed_schemes:
+    - "http"
+    - "https"
+  allowed_hosts:
+    - "*"                # Host resolution is filtered via DNS SSRF guardrail
+  blocked_ip_ranges:
+    - "127.0.0.0/8"      # Loopback (IPv4)
+    - "10.0.0.0/8"       # Private Class A
+    - "172.16.0.0/12"    # Private Class B
+    - "192.168.0.0/16"   # Private Class C
+    - "169.254.0.0/16"   # Link-Local / Cloud Metadata (AWS/GCP/Azure)
+    - "::1/128"          # Loopback (IPv6)
+    - "fc00::/7"         # Unique Local IPv6
+    - "fe80::/10"        # Link-Local IPv6
+  max_response_bytes: 1048576  # 1MB limit per article fetch
+  request_timeout_seconds: 10  # 10s socket timeout
+
+# Deduplication & Canonical Matching Policy
+deduplication:
+  similarity_threshold: 0.5    # Jaccard title similarity threshold for Tier 2 LLM check
+  max_disambiguation_calls: 5  # Cap on disambiguation calls to preserve token budget

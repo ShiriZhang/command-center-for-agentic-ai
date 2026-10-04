@@ -100,4 +100,32 @@ export const api = {
 
   deleteUser: (id) => 
     apiRequest(`/api/users/${id}`, { method: 'DELETE' }),
+
+  // -----------------------------------------------------------
+  // Agentic Research Tracker (Assignment 1B)
+  // -----------------------------------------------------------
+  getTrackerRuns: () =>
+    apiRequest('/api/tracker/runs', { method: 'GET' }),
+
+  getTrackerRunById: (runId) =>
+    apiRequest(`/api/tracker/runs/${runId}`, { method: 'GET' }),
+
+  createTrackerRun: (payload) =>
+    apiRequest('/api/tracker/runs', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  triggerTracker: (payload = {}) =>
+    apiRequest('/api/tracker/trigger', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  getTrackerHistory: () =>
+    apiRequest('/api/tracker/history', { method: 'GET' }),
+
+  clearTrackerRuns: () =>
+    apiRequest('/api/tracker/runs', { method: 'DELETE' }),
 };
+

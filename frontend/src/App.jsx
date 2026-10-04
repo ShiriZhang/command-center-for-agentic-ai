@@ -4,6 +4,7 @@ import AuthCard from './components/AuthCard';
 import Navbar from './components/Navbar';
 import HomeView from './components/HomeView';
 import AccountView from './components/AccountView';
+import TrackerView from './components/TrackerView';
 import { Loader2 } from 'lucide-react';
 
 function MainLayout() {
@@ -25,14 +26,18 @@ function MainLayout() {
     return <AuthCard />;
   }
 
-  // Authenticated: Header + Screen 3 (Home) or Screen 4 (Account)
+  // Authenticated: Header + Screen 3 (Home), Screen 4 (Account), or Screen 5 (Tracker)
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col text-slate-100">
       <Navbar currentTab={currentTab} onSelectTab={setCurrentTab} />
       <main className="flex-1 pb-16">
         {currentTab === 'home' && (
-          <HomeView onNavigateToAccount={() => setCurrentTab('account')} />
+          <HomeView 
+            onNavigateToAccount={() => setCurrentTab('account')} 
+            onNavigateToTracker={() => setCurrentTab('tracker')}
+          />
         )}
+        {currentTab === 'tracker' && <TrackerView />}
         {currentTab === 'account' && <AccountView />}
       </main>
     </div>

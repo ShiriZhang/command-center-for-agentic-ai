@@ -1,0 +1,122 @@
+{
+  "run_number": 2,
+  "visited_urls": [
+    "http://job-boards.greenhouse.io/torcrobotics/jobs/8728723002",
+    "https://jobright.ai/entry-level-jobs",
+    "https://jobs.ashbyhq.com/harvey/4d8dc9ba-eb86-4d88-af7d-65d2fdaf3fdc",
+    "https://jobs.lever.co/jobgether/4d090288-0343-42cd-8be2-956361f014b3",
+    "https://recentlypostedjobs.com/guides/junior-new-grad-remote-ai-engineer",
+    "https://scale.com/careers/4730836005",
+    "https://simplify.jobs/l/New-Grad-Data-Science-AI-ML",
+    "https://www.fastaijobs.com/jobs/new-grad"
+  ],
+  "top_k_jobs": [
+    {
+      "title": "4,000+ Research Engineer Machine Learning 2026 New Grad Nlp ...",
+      "company": "Linkedin",
+      "url": "https://www.linkedin.com/jobs/research-engineer-machine-learning-2026-new-grad-nlp-pytorch-llm-entry-level-remote-site-linkedin.com-or-site-greenhouse.io-september-2026-jobs",
+      "location": "Remote",
+      "snippet": "Today's top 4,000+ Research Engineer Machine Learning 2026 New Grad Nlp Pytorch Llm Entry Level Remote Site Linkedin.com Or Site Greenhouse.io September 2026 jobs in United States. Leverage your",
+      "compensation": "",
+      "fingerprint": "linkedin:4 000 research engineer machine learning 2026 new grad nlp",
+      "supporting_sources": []
+    },
+    {
+      "title": "Senior Machine Learning Engineer",
+      "company": "Samsara",
+      "url": "https://www.samsara.com/company/careers/roles/8055245?gh_jid=8055245",
+      "location": "Remote",
+      "snippet": "Company: Samsara | Level: senior | Location: Remote (US) | Compensation: $170,170 - $286,000. Overview: Who we are Samsara (NYSE: IOT) is the pioneer of the Connected Operations™ Cloud, which is a platform that enables organizations that depend on physical operations to harness Internet of Things (IoT) data to develop actionable insights and improve their operations. At Samsara, we are helping impro...",
+      "compensation": "",
+      "fingerprint": "samsara:senior machine learning engineer",
+      "supporting_sources": []
+    },
+    {
+      "title": "Simplify Jobs",
+      "company": "New Grad Data Science & AI/ML Jobs (2026-2027)",
+      "url": "https://simplify.jobs/l/New-Grad-Data-Science-AI-ML",
+      "location": "Remote",
+      "snippet": "Entry-level openings can include data scientist, machine-learning engineer, AI engineer, data engineer, analytics engineer, decision scientist, and applied research roles. The emphasis varies: some jobs focus on analyzing data and experiments, others build pipelines or production systems, and research-oriented positions may develop or evaluate models. Read the responsibilities rather than relying on the title, because companies label similar work differently. Look for the balance among [...] The process often combines practical coding with analytical reasoning. You may encounter SQL or Python exercises, statistics and probability questions, experiment or product cases, model-evaluation discussions, and behavioral questions about past projects. Machine-learning engineering roles may test algorithms, software design, or production considerations; data-engineering roles may focus on pipelines, schemas, and reliability. Prepare to explain why you chose a method, what could go wrong, [...] Most roles expect competence in Python or another analytical language, SQL, data cleaning, basic statistics, and the ability to explain results clearly. Machine-learning positions may add model evaluation, feature engineering, and familiarity with common libraries, while data-engineering roles emphasize databases, pipelines, cloud tools, and reliable software practices. Employers rarely expect mastery of every tool listed. Prioritize fundamentals, then learn the stack most relevant to your",
+      "compensation": "",
+      "fingerprint": "new grad data science ml jobs:simplify jobs",
+      "supporting_sources": []
+    },
+    {
+      "title": "Senior Software Engineer, ML Ops",
+      "company": "PathAI",
+      "url": "https://www.pathai.com/careers/8769653002?gh_jid=8769653002",
+      "location": "Remote",
+      "snippet": "Company: PathAI | Level: senior | Location: Boston, MA | Compensation: $127,500 - $195,500. Overview: PathAI's mission is to improve patient outcomes with AI-powered pathology. PathAI is transforming traditional pathology methods into powerful, new technologies. These innovations in pathology can help accelerate drug development, improve confidence in the accuracy of diagnosis, and get life-saving...",
+      "compensation": "",
+      "fingerprint": "pathai:senior software engineer machine learning ops",
+      "supporting_sources": []
+    },
+    {
+      "title": "Machine Learning Jobs (2026) — ML Engineer & AI Roles",
+      "company": "Lumiai",
+      "url": "https://lumijobs.ai/jobs/machine-learning",
+      "location": "Remote",
+      "snippet": "This page indexes every machine-learning-adjacent role across the ATS platforms we ingest from — Greenhouse, Lever, Ashby, Workday. Titles range from ML Engineer (production model serving, MLOps) to Applied Scientist (research-flavored IC) to Research Scientist (publishing track) to AI Engineer (LLM application work). [...] 💻Software Engineering🛠️Engineering & Dev🤖Machine Learning & AI📦Product Management🏠Remote🌱Entry Level🛂Visa Sponsored📈Data Analyst🛒Sales📢Marketing📊Business Analyst🎓Internships⭐Senior Engineer⚙️DevOps & SRE🔒Security🎨Design💼Consulting📝Project Manager☎️Customer Success🏢Browse Companies Narrow:ML EngineerAI EngineerResearch ScientistMLOps EngineerResearch Engineer Filter:50 roles [...] | 29 | Computer Vision and Deep Learning Intern | | 👍Apply | On Site | Santa Clara, CA | NVIDIA | — | 10000+ | Semiconductors | deep learning | Yes | yes | | 30 | Founding Machine Learning Engineer | | 👍Apply | On Site | Mountain View | Clera | $220k–$300k /yr | — | — | Python, C++, PyTorch | No | no | | 31 | Senior Machine Learning Engineer | | 👍Apply | Remote | Palo Alto · Remote | Clera | $146k–$156k /yr | — | — | Python, SQL, Apache Spark | No | no |",
+      "compensation": "",
+      "fingerprint": "lumiai:machine learning jobs machine learning engineer roles",
+      "supporting_sources": []
+    },
+    {
+      "title": "Senior Machine Learning Engineer, Predictive Planner, Systems Arch",
+      "company": "Waymo",
+      "url": "https://careers.withwaymo.com/jobs?gh_jid=8191840",
+      "location": "Remote",
+      "snippet": "Company: Waymo | Level: senior | Location: Mountain View, CA | Compensation: $213,000 - $263,000. Overview: Waymo is an autonomous driving technology company with the mission to be the world's most trusted driver. Since its start as the Google Self-Driving Car Project in 2009, Waymo has focused on building the Waymo Driver—The World's Most Experienced Driver™—to improve access to mobility while saving tho...",
+      "compensation": "",
+      "fingerprint": "waymo:senior machine learning engineer predictive planner systems arch",
+      "supporting_sources": []
+    },
+    {
+      "title": "Machine Learning Engineer",
+      "company": "HubMub",
+      "url": "https://www.hubmub.com/jobs/814396/machine-learning-engineer",
+      "location": "Remote",
+      "snippet": "Greenhouse is looking for a Machine Learning Engineer to join our team! In this role, you'll work with our team to develop machine learning models that enhance Greenhouse products like resume parsing/anonymization, hiring, sourcing, and predictive analytics.",
+      "compensation": "",
+      "fingerprint": "hubmub:machine learning engineer",
+      "supporting_sources": []
+    },
+    {
+      "title": "Senior Machine Learning Engineer, Public Sector",
+      "company": "Scale AI",
+      "url": "https://job-boards.greenhouse.io/scaleai/jobs/4732798005",
+      "location": "Remote",
+      "snippet": "Company: Scale AI | Level: senior | Location: Denver, CO | Compensation: $235,200 - $294,000. Overview: The goal of a Senior Machine Learning Engineer at Scale is to own how we apply generative AI, agentic AI, computer vision, and reinforcement learning to mission-critical problems in production. Our senior machine learning engineers are handed problems that don't yet have an established approach, the...",
+      "compensation": "",
+      "fingerprint": "scale:senior machine learning engineer public sector",
+      "supporting_sources": []
+    },
+    {
+      "title": "Greenhouse Software hiring Machine Learning Engineer in ...",
+      "company": "Linkedin",
+      "url": "https://www.linkedin.com/jobs/view/4355962792?eBP=NOT_ELIGIBLE_FOR_CHARGING",
+      "location": "Remote",
+      "snippet": "In this role, you'll work with our team to develop machine learning models that enhance Greenhouse products like resume parsing/anonymization, hiring, sourcing, and predictive analytics.",
+      "compensation": "",
+      "fingerprint": "linkedin:greenhouse software hiring machine learning engineer in",
+      "supporting_sources": []
+    },
+    {
+      "title": "Staff / Senior Machine Learning Engineer, Reinforcement Learning",
+      "company": "Wayve",
+      "url": "https://wayve.firststage.co/jobs?gh_jid=8795692002",
+      "location": "Remote",
+      "snippet": "Company: Wayve | Level: lead | Location: Sunnyvale, CA | Compensation: $311,850 - $389,400. Overview: About us Founded in 2017, Wayve is the leading developer of Embodied AI technology. Our advanced AI software and foundation models enable vehicles to perceive, understand, and navigate any complex environment, enhancing the usability and safety of automated driving systems. Our vision is to c...",
+      "compensation": "",
+      "fingerprint": "wayve:staff senior machine learning engineer reinforcement learning",
+      "supporting_sources": []
+    }
+  ],
+  "metadata": {
+    "status": "error",
+    "halt_reason": "[TERMINAL FAILURE] Account quota or credit limit exhausted: Error code: 413 - {'error': {'message': 'Request too large for model `openai/gpt-oss-20b` in organization `org_01kt4dkkh8es08njt6se6a1789` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Requested 8379, please reduce your message size and try again. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}",
+    "step_count": 9,
+    "fetch_count": 1,
+    "tokens_spent": 34623
+  }
+}
