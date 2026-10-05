@@ -1,5 +1,6 @@
 """
-search_web Tool supporting Tavily Search API with Candidate Discovery Seeding.
+search_web Tool supporting Seed-First AI Dev Jobs Discovery, Semantic Scoring,
+and Lazy Tavily Rescue Querying with Resilient Fallback.
 CSCI-GA.2630 Assignment 1B: Agentic Foundations
 """
 
@@ -15,6 +16,7 @@ import httpx
 from tavily import TavilyClient
 
 from tracker.config import config
+from tracker.memory.semantic import SemanticMemory
 
 logger = logging.getLogger("tracker.tools.search")
 
@@ -67,7 +69,7 @@ def search_tavily(
     api_key: Optional[str] = None
 ) -> List[Dict[str, Any]]:
     """
-    Executes a web search using the Tavily Search API.
+    Executes an open web search using the Tavily Search API.
     
     Returns normalized list of results with fields:
     title, snippet, url, source, score.
@@ -116,6 +118,23 @@ def search_tavily(
     return normalized
 
 
+def search_tavily_rescue(
+    company: str,
+    title: str,
+    max_results: int = 3,
+    api_key: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """
+    Executes a high-precision targeted Tavily rescue search to locate the direct
+    application/ATS portal page for a candidate role when direct link is missing or fetch failed.
+    """
+    clean_company = re.sub(r"[^\w\s-]", "", company).strip()
+    clean_title = re.sub(r"[^\w\s-]", "", title).strip()
+    query = f'"{clean_company}" "{clean_title}" apply careers (greenhouse OR lever OR ashby)'
+    logger.info(f"Initiating lazy Tavily rescue search for '{clean_company} - {clean_title}'")
+    return search_tavily(query=query, max_results=max_results, api_key=api_key)
+
+
 def discover_aidevboard_candidates(
     query: str = "",
     max_results: int = 5,
@@ -124,9 +143,10 @@ def discover_aidevboard_candidates(
     """
     Candidate discovery integration from AI Dev Jobs API (https://aidevboard.com/api/v1/jobs).
     Seeds high-quality candidate job postings with direct ATS career portal links (Greenhouse, Ashby, Lever).
+    Handles API outages gracefully by logging fallback notices and returning an empty list.
     
     Returns normalized list of results with fields:
-    title, snippet, url, source, company, apply_url.
+    title, snippet, url, source, company, apply_url, date_posted, salary, relevance_score.
     """
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) FNMS-Tracker/1.0",
@@ -137,11 +157,17 @@ def discover_aidevboard_candidates(
         with httpx.Client(timeout=10.0, verify=True) as client:
             resp = client.get(api_url, params={"per_page": 50}, headers=headers)
             if resp.status_code != 200:
-                logger.warning(f"AI Dev Jobs API returned HTTP {resp.status_code}")
+                logger.warning(
+                    f"AI Dev Jobs API outage: HTTP {resp.status_code}. "
+                    "Transparent fallback to Tavily web search activated."
+                )
                 return []
             data = resp.json()
     except Exception as e:
-        logger.warning(f"Failed to fetch candidates from AI Dev Jobs API: {e}")
+        logger.warning(
+            f"AI Dev Jobs API connection error/timeout: {e}. "
+            "Transparent fallback to Tavily web search activated."
+        )
         return []
 
     jobs = data.get("jobs", []) if isinstance(data, dict) else []
@@ -160,6 +186,7 @@ def discover_aidevboard_candidates(
         tags = [t.lower() for t in job.get("tags") or []]
         apply_url = (job.get("apply_url") or "").strip()
         board_url = (job.get("url") or "").strip()
+        date_posted = (job.get("posted_at") or job.get("date_posted") or "").strip()
 
         # Target direct corporate ATS URL if available, fallback to board URL
         target_url = apply_url or board_url
@@ -187,8 +214,10 @@ def discover_aidevboard_candidates(
         # Compose clean descriptive snippet
         loc = job.get("location") or "Remote / Unspecified"
         salary_str = ""
+        salary_val = ""
         if job.get("salary_min") and job.get("salary_max"):
-            salary_str = f" | Compensation: ${job['salary_min']:,} - ${job['salary_max']:,}"
+            salary_val = f"${job['salary_min']:,} - ${job['salary_max']:,}"
+            salary_str = f" | Compensation: {salary_val}"
         
         clean_desc = re.sub(r"\s+", " ", desc[:300])
         snippet = (
@@ -205,6 +234,8 @@ def discover_aidevboard_candidates(
             "source": "aidevboard",
             "company": company,
             "apply_url": apply_url,
+            "date_posted": date_posted,
+            "salary": salary_val,
             "relevance_score": score
         })
 
@@ -216,64 +247,93 @@ def discover_aidevboard_candidates(
 def search_web(
     query: str,
     max_results: int = 5,
-    include_candidates: bool = True
+    include_candidates: bool = True,
+    semantic_memory: Optional[SemanticMemory] = None
 ) -> SearchResultList:
     """
-    Unified web search tool integrating Tavily Search API with AI Dev Jobs candidate discovery.
+    Unified web search tool integrating Seed-First AI Dev Jobs candidate discovery
+    with Tavily Search API, SemanticMemory prioritization, and resilient fallback.
     
     Parameters:
         query: Search keywords or query string.
         max_results: Maximum number of merged results to return.
         include_candidates: Whether to seed target job discoveries from aidevboard.com.
+        semantic_memory: Optional SemanticMemory instance for scoring and qualification filtering.
         
     Returns:
         SearchResultList containing normalized dict items with fields:
-        'title', 'snippet', 'url', 'source'.
+        'title', 'snippet', 'url', 'source', 'priority_score'.
     """
-    # Step 1: Query Tavily open web search
-    tavily_results: List[Dict[str, Any]] = []
-    try:
-        tavily_results = search_tavily(query, max_results=max_results)
-    except Exception as e:
-        logger.warning(f"Tavily search encountered error: {e}")
-        # If tavily failed, we will still attempt candidate discovery if enabled
-
-    # Step 2: Query AI Dev Jobs candidate discovery if enabled
+    semantic = semantic_memory or SemanticMemory()
     candidate_results: List[Dict[str, Any]] = []
-    if include_candidates:
-        candidate_count = max(2, max_results // 2)
-        candidate_results = discover_aidevboard_candidates(query, max_results=candidate_count)
+    tavily_results: List[Dict[str, Any]] = []
 
-    # Step 3: Merge and deduplicate by URL
+    # Step 1: Seed-first candidate discovery from AI Dev Jobs
+    if include_candidates:
+        try:
+            raw_cands = discover_aidevboard_candidates(query, max_results=max_results * 2)
+            for cand in raw_cands:
+                is_qual, score, _ = semantic.score_candidate(cand)
+                if is_qual:
+                    item = dict(cand)
+                    item["priority_score"] = score
+                    candidate_results.append(item)
+            # Sort candidate discoveries by priority_score descending
+            candidate_results.sort(key=lambda x: x.get("priority_score", 0), reverse=True)
+        except Exception as e:
+            logger.warning(f"Error during candidate discovery: {e}. Falling back to Tavily.")
+
+    # Step 2: Query Tavily when needed:
+    # - If candidate seeding is disabled
+    # - Or if candidate seeding yielded fewer than max_results (supplement or fallback)
+    need_tavily = (not include_candidates) or (len(candidate_results) < max_results)
+
+    if need_tavily:
+        try:
+            tavily_count = max_results if not candidate_results else max(2, max_results - len(candidate_results))
+            tav_items = search_tavily(query, max_results=tavily_count)
+            for item in tav_items:
+                is_qual, score, _ = semantic.score_candidate(item)
+                item_dict = dict(item)
+                item_dict["priority_score"] = score if is_qual else 0
+                tavily_results.append(item_dict)
+        except Exception as e:
+            logger.warning(f"Tavily search unavailable: {e}")
+
+    # Step 3: Canonical URL Deduplication & Priority Merge
     seen_urls = set()
     merged: List[Dict[str, Any]] = []
 
     def _canonical_url(u: str) -> str:
-        parsed = urlparse(u)
+        if not u:
+            return ""
+        parsed = urlparse(u.strip())
         return f"{parsed.netloc.lower()}{parsed.path.rstrip('/')}"
 
-    # Alternate insertion: Tavily results + Candidate discoveries
-    i, j = 0, 0
-    while len(merged) < max_results and (i < len(tavily_results) or j < len(candidate_results)):
-        if i < len(tavily_results):
-            item = tavily_results[i]
-            i += 1
-            canon = _canonical_url(item["url"])
-            if canon not in seen_urls:
-                seen_urls.add(canon)
-                merged.append(item)
-                if len(merged) >= max_results:
-                    break
+    # Combine candidates: seed discoveries first, then Tavily results
+    # Rank overall candidate pool:
+    # 1. Qualified items first (priority_score > 0)
+    # 2. Priority score descending
+    # 3. Direct ATS source (aidevboard with ATS) prioritized
+    all_candidates = candidate_results + tavily_results
+    all_candidates.sort(
+        key=lambda x: (
+            1 if x.get("priority_score", 0) > 0 else 0,
+            x.get("priority_score", 0),
+            1 if x.get("source") == "aidevboard" else 0
+        ),
+        reverse=True
+    )
 
-        if j < len(candidate_results):
-            item = candidate_results[j]
-            j += 1
-            canon = _canonical_url(item["url"])
-            if canon not in seen_urls:
-                seen_urls.add(canon)
-                merged.append(item)
-                if len(merged) >= max_results:
-                    break
+    for item in all_candidates:
+        raw_url = item.get("url") or item.get("apply_url") or ""
+        canon = _canonical_url(raw_url)
+        if not canon or canon in seen_urls:
+            continue
+        seen_urls.add(canon)
+        merged.append(item)
+        if len(merged) >= max_results:
+            break
 
     return SearchResultList(merged, query=query)
 

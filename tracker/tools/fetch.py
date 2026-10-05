@@ -127,25 +127,53 @@ def clean_html_to_text(html_content: str) -> Tuple[str, str]:
     return title, clean_text
 
 
-def fetch_article(url: str) -> Dict[str, Any]:
+def fetch_article(
+    url: str,
+    episodic_memory: Optional[Any] = None
+) -> Dict[str, Any]:
     """
     Fetches and sanitizes article content with multi-layered network security:
     1. Scheme and SSRF DNS pre-resolution guardrails.
     2. Hop-by-Hop Redirect Inspection (follow_redirects=False) preventing redirect bounce SSRF.
     3. 10-second timeout and 1MB size limit.
     4. Clean plain-text extraction neutralizing embedded HTML/script payloads.
+    5. EpisodicMemory cache interception returning cached_active status with zero network I/O.
     
     Returns a standardized dictionary compliant with the Assignment 1B specification:
     {
         "url": str,
         "title": str,
         "content": str,
-        "status": "fetched" | "rejected" | "error",
+        "status": "fetched" | "rejected" | "error" | "cached_active",
         "error": Optional[str],
         "byte_size": int,
         "fetch_time_ms": int
     }
     """
+    # Step 0: Check Episodic Memory cache before network I/O
+    if episodic_memory is not None:
+        is_known = False
+        if hasattr(episodic_memory, "is_url_known"):
+            is_known = episodic_memory.is_url_known(url)
+        elif hasattr(episodic_memory, "is_seen"):
+            is_known = episodic_memory.is_seen(url)
+
+        if is_known:
+            if hasattr(episodic_memory, "get_cached_job_info"):
+                return episodic_memory.get_cached_job_info(url)
+            return {
+                "url": url,
+                "current_url": url,
+                "title": "Cached Active Article",
+                "content": "Retained active posting from previous crawl run.",
+                "status": "cached_active",
+                "cached": True,
+                "error": None,
+                "error_message": None,
+                "byte_size": 0,
+                "fetch_time_ms": 0.0
+            }
+
     start_time = time.time()
     current_url = url
     max_redirects = 3

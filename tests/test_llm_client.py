@@ -58,6 +58,39 @@ class TestLLMClient(unittest.TestCase):
         self.assertFalse(is_term)
         self.assertEqual(code, 429)
 
+    def test_classify_error_groq_tpm_with_billing_url_is_transient(self):
+        """
+        Verify Groq 429 TPM error containing billing/upgrade URL is classified as TRANSIENT,
+        NOT terminal quota exhaustion.
+        """
+        groq_tpm_msg = (
+            "Rate limit reached for model `llama-3.3-70b-versatile` on tokens per minute (TPM): "
+            "Limit 8000, Used 8050, Requested 500. Please try again in 4.2s. "
+            "Visit https://console.groq.com/settings/billing to upgrade to Dev Tier."
+        )
+        resp_tpm = self._make_http_response(429, groq_tpm_msg.encode("utf-8"))
+        err_tpm = RateLimitError(groq_tpm_msg, response=resp_tpm, body=None)
+        is_term, reason, code = classify_error(err_tpm)
+        self.assertFalse(is_term, "Groq TPM rate limit with billing link must NOT be classified as terminal!")
+        self.assertEqual(code, 429)
+        self.assertIn("tpm", reason.lower())
+
+    def test_classify_error_groq_413_request_too_large_is_transient(self):
+        """
+        Verify HTTP 413 Request Too Large containing billing/upgrade URL is classified as TRANSIENT,
+        allowing context pruning and backoff.
+        """
+        groq_413_msg = (
+            "Request too large for model `llama-3.3-70b-versatile`: 8500 tokens requested. "
+            "Max allowed is 8000 tokens. Visit https://console.groq.com/settings/billing to upgrade."
+        )
+        from openai import APIStatusError
+        resp_413 = self._make_http_response(413, groq_413_msg.encode("utf-8"))
+        err_413 = APIStatusError(groq_413_msg, response=resp_413, body=None)
+        is_term, reason, code = classify_error(err_413)
+        self.assertFalse(is_term, "HTTP 413 token limit must NOT be classified as terminal!")
+        self.assertEqual(code, 413)
+
     def test_terminal_authentication_failure_zero_retries(self):
         """
         Requirement 5 Verification:
@@ -127,6 +160,39 @@ class TestLLMClient(unittest.TestCase):
         self.assertEqual(mock_create.call_count, 2)
         self.assertEqual(mock_sleep.call_count, 1)
         self.assertEqual(client.cumulative_total_tokens, 30)
+
+    def test_groq_tpm_error_triggers_backoff_and_succeeds(self):
+        """
+        Verify that a Groq TPM error containing a billing link triggers exponential backoff
+        and does NOT prematurely abort as a terminal error.
+        """
+        client = LLMClient(api_key="valid_key", max_retries=3, base_delay=0.01)
+
+        groq_tpm_msg = (
+            "Rate limit reached for model `llama-3.3-70b-versatile` on tokens per minute (TPM): "
+            "Limit 8000, Used 8050, Requested 500. Please try again in 4.2s. "
+            "Visit https://console.groq.com/settings/billing to upgrade to Dev Tier."
+        )
+        resp_tpm = self._make_http_response(429, groq_tpm_msg.encode("utf-8"))
+        mock_tpm_err = RateLimitError(groq_tpm_msg, response=resp_tpm, body=None)
+
+        mock_success = MagicMock()
+        mock_success.choices = [MagicMock()]
+        mock_success.choices[0].message.content = "Recovered after TPM backoff"
+        mock_success.usage.prompt_tokens = 50
+        mock_success.usage.completion_tokens = 25
+        mock_success.usage.total_tokens = 75
+
+        mock_create = MagicMock(side_effect=[mock_tpm_err, mock_success])
+        client.client.chat.completions.create = mock_create
+
+        with patch("time.sleep") as mock_sleep:
+            res = client.create_completion([{"role": "user", "content": "analyze"}])
+
+        self.assertEqual(res.choices[0].message.content, "Recovered after TPM backoff")
+        self.assertEqual(mock_create.call_count, 2)
+        self.assertEqual(mock_sleep.call_count, 1)
+        self.assertEqual(client.cumulative_total_tokens, 75)
 
     def test_transient_exhaustion_raises_transient_error(self):
         """

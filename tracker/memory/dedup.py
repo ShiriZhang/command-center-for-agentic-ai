@@ -1,20 +1,18 @@
 """
-Recrawl Memory Manager and Two-Tier Job Deduplication Engine.
+Two-Tier Job Deduplication Engine and Fingerprinting Utilities.
 CSCI-GA.2630 Assignment 1B: Agentic Foundations
 """
 
 import json
 import logging
-import os
 import re
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 from urllib.parse import urlparse
 
 from tracker.config import config
 from tracker.llm import LLMClient
 
-logger = logging.getLogger("tracker.memory")
+logger = logging.getLogger("tracker.memory.dedup")
 
 # Recognized corporate Applicant Tracking Systems (ATS)
 ATS_DOMAINS = (
@@ -168,13 +166,11 @@ class JobDeduplicator:
                 max_tokens=250
             )
             content = resp.choices[0].message.content or ""
-            # Parse JSON from content (handling optional markdown code fences)
             clean_json = re.sub(r"^```json\s*|\s*```$", "", content.strip(), flags=re.MULTILINE).strip()
             data = json.loads(clean_json)
             return bool(data.get("is_same_role")), data.get("reason", ""), data.get("canonical_title", job1.get("title"))
         except Exception as e:
             logger.warning(f"LLM semantic disambiguation failed: {e}. Defaulting to false.")
-            # Conservative default: do not merge on error to avoid false positives
             return False, f"Disambiguation error: {e}", job1.get("title", "")
 
     def merge_records(self, primary: Dict[str, Any], secondary: Dict[str, Any]) -> Dict[str, Any]:
@@ -189,7 +185,6 @@ class JobDeduplicator:
         sec_url = secondary.get("url", "")
 
         if not is_ats_url(pri_url) and is_ats_url(sec_url):
-            # Promote secondary ATS link to primary
             merged["url"] = sec_url
             sources = set(merged.get("supporting_sources", []))
             if pri_url:
@@ -201,7 +196,6 @@ class JobDeduplicator:
                 sources.add(sec_url)
             merged["supporting_sources"] = list(sources)
 
-        # Merge location/compensation if primary lacked them
         if not merged.get("location") and secondary.get("location"):
             merged["location"] = secondary["location"]
         if not merged.get("compensation") and secondary.get("compensation"):
@@ -249,131 +243,3 @@ class JobDeduplicator:
                 canonical_jobs.append(dict(candidate))
 
         return canonical_jobs
-
-
-# ==============================================================================
-# 3. Recrawl Memory Manager
-# ==============================================================================
-
-class RecrawlMemoryManager:
-    """
-    Persists and inspects multi-run state, providing:
-    1. Known URL persistence (Run 2 skips Run 1 URLs).
-    2. Multi-run classification: 'New since last run', 'Still in top K', 'Dropped'.
-    """
-
-    def __init__(self, state_file_path: Optional[Path] = None):
-        root_dir = Path(__file__).resolve().parent.parent
-        self.state_file = state_file_path or (root_dir / "reports" / "tracker_state.json")
-        self.deduplicator = JobDeduplicator()
-
-    def load_previous_state(self) -> Optional[Dict[str, Any]]:
-        """Loads state persisted from prior executions."""
-        if not self.state_file.exists():
-            return None
-        try:
-            with open(self.state_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            logger.warning(f"Could not read previous tracker state: {e}")
-            return None
-
-    def get_known_urls(self) -> Set[str]:
-        """Returns set of all URLs visited in prior runs to prevent re-crawling."""
-        state = self.load_previous_state()
-        if not state:
-            return set()
-        return set(state.get("visited_urls", []))
-
-    def get_previous_top_k(self) -> List[Dict[str, Any]]:
-        """Returns Top K roles saved from the previous run."""
-        state = self.load_previous_state()
-        if not state:
-            return []
-        return state.get("top_k_jobs", [])
-
-    def classify_multi_run_developments(
-        self,
-        previous_top_k: List[Dict[str, Any]],
-        current_top_k: List[Dict[str, Any]]
-    ) -> Dict[str, List[Dict[str, Any]]]:
-        """
-        Classifies findings into the three mandatory categories:
-        1. 'New since last run': Present in current Top K, absent in previous Top K.
-        2. 'Still in top K': Present in both previous and current Top K.
-        3. 'Dropped': Present in previous Top K, absent in current Top K.
-        """
-        prev_fps: Dict[str, Dict[str, Any]] = {}
-        for p in previous_top_k:
-            fp = p.get("fingerprint") or generate_fingerprint(p.get("company", ""), p.get("title", ""))
-            prev_fps[fp] = p
-
-        curr_fps: Dict[str, Dict[str, Any]] = {}
-        for c in current_top_k:
-            fp = c.get("fingerprint") or generate_fingerprint(c.get("company", ""), c.get("title", ""))
-            curr_fps[fp] = c
-
-        new_since_last_run: List[Dict[str, Any]] = []
-        still_in_top_k: List[Dict[str, Any]] = []
-        dropped: List[Dict[str, Any]] = []
-
-        # Analyze current top K
-        for fp, job in curr_fps.items():
-            if fp in prev_fps:
-                item = dict(job)
-                item["status"] = "Still in top K"
-                item["recrawl_badge"] = "[STILL IN TOP 10]"
-                still_in_top_k.append(item)
-            else:
-                item = dict(job)
-                item["status"] = "New since last run"
-                item["recrawl_badge"] = "[NEW]"
-                new_since_last_run.append(item)
-
-        # Analyze dropped positions
-        for fp, prev_job in prev_fps.items():
-            if fp not in curr_fps:
-                item = dict(prev_job)
-                item["status"] = "Dropped"
-                item["recrawl_badge"] = "[DROPPED]"
-                dropped.append(item)
-
-        return {
-            "new_since_last_run": new_since_last_run,
-            "still_in_top_k": still_in_top_k,
-            "dropped": dropped
-        }
-
-    def save_state(
-        self,
-        run_number: int,
-        visited_urls: Set[str],
-        top_k_jobs: List[Dict[str, Any]],
-        metadata: Optional[Dict[str, Any]] = None
-    ) -> None:
-        """Persists state to local JSON file for subsequent run comparison."""
-        self.state_file.parent.mkdir(parents=True, exist_ok=True)
-
-        # Accumulate with previous URLs
-        prev_urls = self.get_known_urls()
-        all_urls = sorted(list(prev_urls.union(visited_urls)))
-
-        # Ensure canonical fingerprints
-        deduped = self.deduplicator.deduplicate_job_list(top_k_jobs)
-
-        data = {
-            "run_number": run_number,
-            "visited_urls": all_urls,
-            "top_k_jobs": deduped,
-            "metadata": metadata or {}
-        }
-
-        with open(self.state_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
-        logger.info(f"Saved tracker recrawl state to {self.state_file}")
-
-    def reset_state(self) -> None:
-        """Wipes the local state file for clean testing from scratch."""
-        if self.state_file.exists():
-            self.state_file.unlink()
-            logger.info("Cleared tracker recrawl state.")

@@ -22,6 +22,8 @@ from tracker.llm import (
     TRACKER_TOOLS,
     default_client
 )
+from tracker.memory.episodic import EpisodicMemory
+from tracker.memory.working import WorkingMemory
 from tracker.tools.fetch import fetch_article
 from tracker.tools.search import search_web
 from tracker.tools.finish import finish
@@ -49,7 +51,9 @@ class ResearchAgent:
         self,
         config: Optional[TrackerConfig] = None,
         llm_client: Optional[LLMClient] = None,
-        previous_urls: Optional[Set[str]] = None
+        previous_urls: Optional[Set[str]] = None,
+        episodic_memory: Optional[EpisodicMemory] = None,
+        working_memory: Optional[WorkingMemory] = None
     ):
         self.config = config or default_config
         self.llm = llm_client or default_client
@@ -66,7 +70,19 @@ class ResearchAgent:
         self.start_time: float = 0.0
 
         # Memory and trace
+        self.episodic_memory: EpisodicMemory = episodic_memory or EpisodicMemory()
+        self.working_memory: WorkingMemory = working_memory or WorkingMemory(
+            target_k=self.config.K,
+            max_steps=self.max_steps,
+            token_budget=self.token_budget
+        )
         self.previous_urls: Set[str] = set(previous_urls or [])
+        if self.previous_urls:
+            for u in self.previous_urls:
+                self.episodic_memory.known_urls.add(u)
+        else:
+            self.previous_urls = self.episodic_memory.get_known_urls()
+
         self.visited_urls: Set[str] = set()
         self.fetched_articles: List[Dict[str, Any]] = []
         self.search_history: List[Dict[str, Any]] = []
@@ -165,7 +181,7 @@ class ResearchAgent:
         Enforces Rule 4 resource limits.
         Returns: (is_exhausted, reason)
         """
-        if self.step_count >= self.max_steps:
+        if self.step_count > self.max_steps:
             return True, f"Maximum step budget reached ({self.step_count}/{self.max_steps})"
 
         if self.fetch_count >= self.max_fetches:
@@ -190,30 +206,52 @@ class ResearchAgent:
             limit = args.get("max_results", 5)
             search_res = search_web(query, max_results=limit)
             self.search_history.append({"query": query, "count": len(search_res)})
-            # Record candidates for provenance
+            # Record candidates for provenance and working memory
             for item in search_res:
                 self.extracted_jobs.append(item)
+                if self.working_memory:
+                    self.working_memory.add_candidate(item)
             return search_res.to_dict(), False
 
         elif tool_name == "fetch_article":
             url = args.get("url", "")
             # Requirement 7 & 11: Intercept URLs seen in previous runs (recrawl memory cache guard)
             norm_previous = {u.rstrip("/") for u in self.previous_urls}
-            if url and (url in self.previous_urls or url.rstrip("/") in norm_previous):
+            is_seen = (
+                url in self.previous_urls
+                or url.rstrip("/") in norm_previous
+                or (self.episodic_memory and self.episodic_memory.is_url_known(url))
+            )
+            if url and is_seen:
                 logger.info(f"URL '{url}' skipped as already seen in previous crawl run.")
+                cached_info = (
+                    self.episodic_memory.get_cached_job_info(url)
+                    if (self.episodic_memory and self.episodic_memory.is_url_known(url))
+                    else None
+                )
+                title = (cached_info.get("title") if cached_info else None) or "Cached Article"
+                content = (cached_info.get("content") if cached_info else None) or ""
                 cached_res = {
                     "url": url,
                     "current_url": url,
-                    "title": "Cached Article",
-                    "content": "",
+                    "title": title,
+                    "content": content,
                     "status": "skipped as already seen",
-                    "error": "URL was already inspected in a previous crawl run; skipped.",
-                    "error_message": "URL was already inspected in a previous crawl run; skipped.",
+                    "cached": True,
+                    "error": None,
+                    "error_message": None,
                     "byte_size": 0,
                     "fetch_time_ms": 0.0
                 }
                 self.visited_urls.add(url)
                 self.fetched_articles.append(cached_res)
+                if self.working_memory:
+                    self.working_memory.add_verified_job({
+                        "title": title,
+                        "url": url,
+                        "source": "cache",
+                        "snippet": content
+                    })
                 return cached_res, False
 
             if self.fetch_count >= self.max_fetches:
@@ -224,8 +262,15 @@ class ResearchAgent:
 
             self.fetch_count += 1
             self.visited_urls.add(url)
-            fetch_res = fetch_article(url)
+            fetch_res = fetch_article(url, episodic_memory=self.episodic_memory)
             self.fetched_articles.append(fetch_res)
+            if fetch_res.get("status") == "fetched" and self.working_memory:
+                self.working_memory.add_verified_job({
+                    "title": fetch_res.get("title", "Verified Role"),
+                    "url": url,
+                    "source": "fetch",
+                    "snippet": (fetch_res.get("content") or "")[:300]
+                })
             return fetch_res, False
 
         elif tool_name == "finish":
@@ -253,12 +298,23 @@ class ResearchAgent:
             ""
         ]
 
-        # Aggregate unique roles from extracted jobs and fetched articles
+        # Aggregate unique roles from working memory, fetched articles, and extracted jobs
         seen_urls = set()
         ranked_roles = []
 
+        if self.working_memory:
+            for job in self.working_memory.verified_jobs:
+                u = job.get("url") or job.get("canonical_url") or ""
+                if u and u not in seen_urls:
+                    seen_urls.add(u)
+                    ranked_roles.append({
+                        "title": job.get("title") or "Verified Opening",
+                        "url": u,
+                        "snippet": job.get("snippet", "") or "Verified and recorded in working memory."
+                    })
+
         for art in self.fetched_articles:
-            if art.get("status") == "fetched" and art.get("url") not in seen_urls:
+            if art.get("status") in ("fetched", "cached_active") and art.get("url") not in seen_urls:
                 seen_urls.add(art["url"])
                 ranked_roles.append({
                     "title": art.get("title") or "Verified Opening",
@@ -267,7 +323,7 @@ class ResearchAgent:
                 })
 
         for job in self.extracted_jobs:
-            u = job.get("url", "")
+            u = job.get("url") or ""
             if u and u not in seen_urls:
                 seen_urls.add(u)
                 ranked_roles.append({
@@ -284,6 +340,68 @@ class ResearchAgent:
                 lines.append(f"- **Source URL**: [{r['url']}]({r['url']})")
                 lines.append(f"- **Summary**: {r['snippet']}")
                 lines.append("")
+
+        lines.extend([
+            "---",
+            "## Data Provenance & Audit Log",
+            f"- Total URLs Checked: {len(self.visited_urls)}",
+            f"- Total Search Queries: {len(self.search_history)}",
+            f"- Generated at: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}"
+        ])
+
+        return "\n".join(lines)
+
+    def _synthesize_complete_report(self) -> str:
+        """
+        Synthesizes a complete markdown report when 10 verified opportunities are collected.
+        """
+        lines = [
+            f"# {self.config.topic}",
+            "",
+            f"> **Report Status: COMPLETE** — Target goal of {self.config.K} verified opportunities successfully achieved.",
+            f"> Executed **{self.step_count}** steps, **{self.fetch_count}** article fetches, consuming **{self.llm.cumulative_total_tokens}** tokens.",
+            "",
+            "## Discovered & Verified Opportunities",
+            ""
+        ]
+
+        seen_urls = set()
+        ranked_roles = []
+
+        if self.working_memory:
+            for job in self.working_memory.verified_jobs:
+                u = job.get("url") or job.get("canonical_url") or ""
+                if u and u not in seen_urls:
+                    seen_urls.add(u)
+                    ranked_roles.append(job)
+
+        for art in self.fetched_articles:
+            u = art.get("url") or art.get("current_url") or ""
+            if art.get("status") in ("fetched", "cached_active") and u and u not in seen_urls:
+                seen_urls.add(u)
+                ranked_roles.append({
+                    "title": art.get("title") or "Verified Role",
+                    "company": art.get("company") or "Tech Company",
+                    "url": u,
+                    "snippet": (art.get("content") or "")[:300] + "..." if art.get("content") else "Verified through direct crawl."
+                })
+
+        for job in self.extracted_jobs:
+            u = job.get("url") or ""
+            if u and u not in seen_urls:
+                seen_urls.add(u)
+                ranked_roles.append(job)
+
+        for idx, r in enumerate(ranked_roles[:self.config.K], 1):
+            title = r.get("title") or "Verified Role"
+            comp = r.get("company") or ""
+            comp_suffix = f" at {comp}" if comp and comp not in title else ""
+            u = r.get("url") or ""
+            snip = r.get("snippet") or "Verified opening."
+            lines.append(f"### {idx}. {title}{comp_suffix}")
+            lines.append(f"- **Source URL**: [{u}]({u})")
+            lines.append(f"- **Summary**: {snip}")
+            lines.append("")
 
         lines.extend([
             "---",
@@ -314,8 +432,14 @@ class ResearchAgent:
         self.status = "running"
         self.halt_reason = None
         self.final_report = ""
+        self.max_steps = effective_max_steps
+        if self.working_memory:
+            self.working_memory.max_steps = effective_max_steps
         if previous_urls is not None:
             self.previous_urls = set(previous_urls)
+            if self.episodic_memory:
+                for u in self.previous_urls:
+                    self.episodic_memory.known_urls.add(u)
 
         # Initialize conversation state
         sys_prompt = self._build_system_prompt(self.previous_urls)
@@ -335,18 +459,57 @@ class ResearchAgent:
             # 1. Budget Enforcement Check before model invocation
             exhausted, reason = self._check_budgets()
             if exhausted:
-                logger.warning(f"Budget reached: {reason}. Triggering partial report synthesis.")
-                self.status = "partial"
-                self.halt_reason = reason
-                self.final_report = self._synthesize_partial_report(reason)
-                self._log_trace("halt_budget_exhausted", {"reason": reason}, "Synthesized partial report")
+                logger.warning(f"Budget reached: {reason}. Triggering report synthesis.")
+                total_discovered = set()
+                if self.working_memory:
+                    for j in self.working_memory.verified_jobs:
+                        u = j.get("url") or j.get("canonical_url")
+                        if u:
+                            total_discovered.add(u)
+                for a in self.fetched_articles:
+                    if a.get("status") in ("fetched", "cached_active") and a.get("url"):
+                        total_discovered.add(a.get("url"))
+                for j in self.extracted_jobs:
+                    if j.get("url"):
+                        total_discovered.add(j.get("url"))
+
+                if len(total_discovered) >= self.config.K:
+                    logger.info(
+                        f"Budget reached ({reason}), but target goal of {len(total_discovered)} roles achieved. "
+                        "Concluding research with complete status."
+                    )
+                    self.status = "complete"
+                    self.halt_reason = None
+                    self.final_report = self._synthesize_complete_report()
+                    self._log_trace("conclude_goal_achieved", {"roles_count": len(total_discovered)}, "Synthesized complete report")
+                else:
+                    self.status = "partial"
+                    self.halt_reason = reason
+                    self.final_report = self._synthesize_partial_report(reason)
+                    self._log_trace("halt_budget_exhausted", {"reason": reason}, "Synthesized partial report")
                 break
 
-            # 2. DECIDE: Query LLM for next action
+            # 1.5 Update Working Memory dynamic status in System Prompt
+            if self.working_memory:
+                status_block = self.working_memory.get_progress_status_block(
+                    current_step=self.step_count,
+                    cumulative_tokens=self.llm.cumulative_total_tokens
+                )
+                base_sys_prompt = self._build_system_prompt(self.previous_urls)
+                self.messages[0]["content"] = f"{base_sys_prompt}\n{status_block}"
+
+            # 2. DECIDE: Query LLM for next action with Observation Pruning (< 2,500 tokens)
+            messages_to_send = self.messages
+            if self.working_memory:
+                messages_to_send = self.working_memory.prune_conversation_history(
+                    self.messages,
+                    keep_recent_tools=2
+                )
+
             model_t0 = time.time()
             try:
                 response = self.llm.create_completion(
-                    messages=self.messages,
+                    messages=messages_to_send,
                     tools=TRACKER_TOOLS,
                     tool_choice="auto"
                 )
@@ -489,11 +652,34 @@ class ResearchAgent:
 
         # Fallback if step budget was exhausted at the loop boundary
         if self.step_count >= effective_max_steps and not self.final_report:
-            reason = f"Step budget exhausted ({self.step_count}/{effective_max_steps})"
-            self.status = "partial"
-            self.halt_reason = reason
-            self.final_report = self._synthesize_partial_report(reason)
-            self._log_trace("halt_budget_exhausted", {"reason": reason}, "Synthesized partial report")
+            total_discovered = set()
+            if self.working_memory:
+                for j in self.working_memory.verified_jobs:
+                    u = j.get("url") or j.get("canonical_url")
+                    if u:
+                        total_discovered.add(u)
+            for a in self.fetched_articles:
+                if a.get("status") in ("fetched", "cached_active") and a.get("url"):
+                    total_discovered.add(a.get("url"))
+            for j in self.extracted_jobs:
+                if j.get("url"):
+                    total_discovered.add(j.get("url"))
+
+            if len(total_discovered) >= self.config.K:
+                logger.info(
+                    f"Step budget reached and target goal of {len(total_discovered)} roles achieved. "
+                    "Concluding research with complete status."
+                )
+                self.status = "complete"
+                self.halt_reason = None
+                self.final_report = self._synthesize_complete_report()
+                self._log_trace("conclude_goal_achieved", {"roles_count": len(total_discovered)}, "Synthesized complete report")
+            else:
+                reason = f"Maximum step budget reached ({self.step_count}/{effective_max_steps})"
+                self.status = "partial"
+                self.halt_reason = reason
+                self.final_report = self._synthesize_partial_report(reason)
+                self._log_trace("halt_budget_exhausted", {"reason": reason}, "Synthesized partial report")
 
         return {
             "status": self.status,

@@ -173,16 +173,54 @@ def classify_error(err: Exception) -> Tuple[bool, str, Optional[int]]:
     if isinstance(err, NotFoundError) or status_code == 404:
         return True, f"Model or resource not found (HTTP 404): {err}", 404
 
-    # 2. Check for Account Quota Exhaustion masquerading as 429
-    quota_keywords = ["quota", "credit", "billing", "insufficient_quota", "exceeded your current quota", "balance is too low", "insufficient funds"]
-    if any(kw in err_str for kw in quota_keywords):
+    # 2. Check for Rate Limit & Payload Limit Throttles (TPM / RPM / HTTP 413)
+    # Groq appends 'https://console.groq.com/settings/billing' to standard 413 and TPM limit notices.
+    # These are transient rate or payload limit throttles, NOT fatal account credit depletion.
+    is_tpm_or_rate_limit = any(
+        term in err_str
+        for term in [
+            "tpm",
+            "rpm",
+            "tokens per minute",
+            "requests per minute",
+            "tokens per day",
+            "rate_limit_exceeded",
+            "rate limit reached",
+            "rate limit exceeded",
+            "try again in",
+            "please try again",
+        ]
+    )
+
+    if status_code == 413 or "413" in err_str or "request too large" in err_str or "request entity too large" in err_str:
+        return False, f"Request payload too large (HTTP 413, retryable with pruned context): {err}", 413
+
+    if is_tpm_or_rate_limit:
+        return False, f"Rate limit exceeded (TPM/RPM throttle, retryable): {err}", status_code or 429
+
+    # 3. Check for Genuine Account Quota Exhaustion masquerading as 429
+    # Only treat as fatal if it represents true credit depletion, not a console upgrade URL in a rate limit message
+    genuine_quota_keywords = [
+        "insufficient_quota",
+        "insufficient funds",
+        "exceeded your current quota",
+        "balance is too low",
+        "credit balance is too low",
+        "account deactivated",
+        "quota exceeded",
+    ]
+    if any(kw in err_str for kw in genuine_quota_keywords):
         return True, f"Account quota or credit limit exhausted: {err}", status_code or 429
 
-    # 3. Standard 429 Rate Limit (Transient per-minute throttle)
+    # Generic check for quota or billing only when not part of a console billing URL
+    if ("quota" in err_str or "billing" in err_str) and "console.groq.com" not in err_str and "settings/billing" not in err_str:
+        return True, f"Account quota or billing error: {err}", status_code or 429
+
+    # 4. Standard 429 Rate Limit (Transient per-minute throttle)
     if isinstance(err, RateLimitError) or status_code == 429:
         return False, "Rate limit exceeded (HTTP 429), retryable", 429
 
-    # 4. Network and Gateway Transient Errors
+    # 5. Network and Gateway Transient Errors
     if isinstance(err, (APITimeoutError, APIConnectionError)):
         return False, f"Network connection / timeout error ({type(err).__name__})", status_code
 

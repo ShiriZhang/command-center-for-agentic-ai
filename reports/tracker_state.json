@@ -1,122 +1,118 @@
 {
   "run_number": 2,
   "visited_urls": [
-    "http://job-boards.greenhouse.io/torcrobotics/jobs/8728723002",
-    "https://jobright.ai/entry-level-jobs",
-    "https://jobs.ashbyhq.com/harvey/4d8dc9ba-eb86-4d88-af7d-65d2fdaf3fdc",
-    "https://jobs.lever.co/jobgether/4d090288-0343-42cd-8be2-956361f014b3",
-    "https://recentlypostedjobs.com/guides/junior-new-grad-remote-ai-engineer",
-    "https://scale.com/careers/4730836005",
-    "https://simplify.jobs/l/New-Grad-Data-Science-AI-ML",
-    "https://www.fastaijobs.com/jobs/new-grad"
+    "https://boards.greenhouse.io/andurilindustries/jobs/5233989007?gh_jid=5233989007",
+    "https://boards.greenhouse.io/nextdoor/jobs/1234567890?gh_jid=1234567890",
+    "https://job-boards.greenhouse.io/freeformfuturecorp/jobs/7826634003",
+    "https://jobs.ashbyhq.com/eliseai/a9ae6d71-6938-4597-b4e1-10de48d89dca/application"
   ],
   "top_k_jobs": [
     {
-      "title": "4,000+ Research Engineer Machine Learning 2026 New Grad Nlp ...",
+      "title": "Job Application for Software Engineer (New Grad December 2026)",
+      "company": "Freeform",
+      "url": "https://job-boards.greenhouse.io/freeformfuturecorp/jobs/7826634003",
+      "location": "Remote / Hybrid",
+      "snippet": "Job Application for Software Engineer (New Grad December 2026) at Freeform Back to jobs Software Engineer (New Grad December 2026) Los Angeles, CA (On-site) Apply SOFTWARE ENGINEER (NEW GRAD DECEMBER 2026) \n Freeform builds AI-native manufacturing systems that unify software, hardware, and physics to produce industrial-scale parts at the speed of human ideation. By treating manufacturing as a sing",
+      "compensation": "Disclosed in application portal",
+      "fingerprint": "freeform:job application for software engineer",
+      "supporting_sources": []
+    },
+    {
+      "title": "Electrical Integration Systems Engineer – Edge Compute & Communications",
+      "company": "Anduril Industries",
+      "url": "https://boards.greenhouse.io/andurilindustries/jobs/5233989007?gh_jid=5233989007",
+      "location": "Remote / Hybrid",
+      "snippet": "Job Application for Electrical Integration Systems Engineer, Edge Compute and Communications, Active Clearance at Anduril Industries Electrical Integration Systems Engineer, Edge Compute and Communications, Active Clearance Costa Mesa, California, United States Apply Anduril Industries is a defense technology company with a mission to transform U.S. and allied military capabilities with advanced t",
+      "compensation": "Disclosed in application portal",
+      "fingerprint": "anduril:electrical integration systems engineer edge compute communications",
+      "supporting_sources": []
+    },
+    {
+      "title": "Knowledge Strategy, Senior Associate | Housing",
+      "company": "EliseAI",
+      "url": "https://jobs.ashbyhq.com/eliseai/a9ae6d71-6938-4597-b4e1-10de48d89dca/application",
+      "location": "Remote",
+      "snippet": "Company: EliseAI | Level: senior | Location: New York, NY | Compensation: $120,000 - $160,000. Overview: About EliseAI At EliseAI, we're improving the industries that matter most: housing and healthcare. Everyone needs a place to live and access to quality healthcare, yet both are often harder to secure than they should be. By integrating AI agents deeply into existing workflows, we make them more e...",
+      "compensation": "",
+      "fingerprint": "eliseai:knowledge strategy senior associate housing",
+      "supporting_sources": []
+    },
+    {
+      "title": "Built In San Francisco",
+      "company": "Best Entry Level Machine Learning Jobs in San Francisco Bay Area, CA 2026",
+      "url": "https://www.builtinsf.com/jobs/data-analytics/machine-learning/entry-level",
+      "location": "Remote",
+      "snippet": "AI/ML Engineers will build and deploy AI-native products, autonomous agents, LLM applications, RAG systems, and production ML pipelines. Responsibilities may include integrating AI into crypto infrastructure and consumer products, fine-tuning and evaluating models, optimizing inference, and developing agentic workflows and machine-to-machine payment systems. Engineers will work end-to-end with high-ownership teams in fast-moving environments. [...] Develop, train, evaluate, and deploy machine learning models and AI-powered applications. Responsibilities include data preprocessing, feature engineering, deep learning development, cloud-based model deployment, and collaboration with data engineers, MLOps teams, and business stakeholders. The role also requires applying strong analytical and research skills while staying current with advances in artificial intelligence. [...] Build next-generation voice AI systems for consumer and business applications. Develop persistent memory, complex reasoning, speech pipelines, and production-grade agentic workflows. As an early technical contributor, the ML Engineer will help shape core architecture, take ambiguous concepts through production, and influence user interactions with advanced language models in a fast-paced pre-seed startup.",
+      "compensation": "",
+      "fingerprint": "best entry level machine learning jobs in san francisco bay area ca 2026:built in san francisco",
+      "supporting_sources": []
+    },
+    {
+      "title": "Latest entry level machine learning engineer Jobs In Usa",
+      "company": "OPTnation",
+      "url": "https://www.optnation.com/entry-level-machine-learning-engineer-jobs-in-usa",
+      "location": "Remote",
+      "snippet": "Job Description 💼 Immediate Project Deployments: Experienced US IT Consultants We are reviewing profiles this week for upcoming corporate client projects across the US. 🛑 Screening Requirements: 1️⃣ Prior corporate IT experience in India 2️⃣ Born... Save Job Save Job Email Jobs Email Posted Sep 15, 2026 View Job Details Similar Jobs All Jobs by this Recruiter Apply #### Hiring – Data Analyst | Business Analyst | Data Scientist | Data Engineer | AI/ML | Financial Analyst [...] Job DescriptionJob Title Hiring – Data Analyst | Business Analyst | Data Scientist | Data Engineer | AI/ML | Financial Analyst Job Description 🚨 NOW HIRING – IT & DATA PROFESSIONALS 🇺🇸 We are currently... Save Job Save Job Email Jobs Email Posted Sep 9, 2026 View Job Details Similar Jobs All Jobs by this Recruiter Apply #### Hiring – Data Analyst | Business Analyst | Data Scientist | Data Engineer | AI/ML | Financial Analyst Career Ease IT Solutions – USA [...] Save Job Save Job Email Jobs Email Posted Aug 24, 2026 View Job Details Similar Jobs All Jobs by this Recruiter Apply #### C++ Developer Baanyan software Services Inc – USA Keyskills c++,STL Job DescriptionC++ Developer – W2 | OptNation Job Posting Company: Baanyan Software Services Inc. Job Title: C++ Developer Experience: 4+ Years Location: New Jersey, NJ Employment Type: Full-Time | W2 Only IMPORTANT –... Save Job Save Job Email Jobs Email Posted Aug 21, 2026",
+      "compensation": "",
+      "fingerprint": "optnation:latest entry level machine learning engineer jobs in usa",
+      "supporting_sources": []
+    },
+    {
+      "title": "Remote Entry-level Machine Learning Engineer Jobs in the US",
+      "company": "Remoterocketship",
+      "url": "https://www.remoterocketship.com/us/jobs/entry-level-machine-learning-engineer",
+      "location": "Remote",
+      "snippet": "🕒 August 27 🕒 August 27 #### Workiva 1001 - 5000 💼 Consulting 🏥 Healthcare 📦 Logistics Machine learning engineering intern building tools, tests, and AI agents for Workiva’s secure finance, risk, and sustainability platform. Supporting model development, deployment, and monitoring. 🇺🇸 United States – Remote 💵 $40 / hour ⏱ Part Time ⚪️ Entry-level 🤖 Machine Learning Engineer 🦅 H1B Visa Sponsor info info This company has sponsored H1B visas in the past. 👻 Ghost score 3% [...] Numpy Pandas Python Scikit-Learn SDLC Spark SQL ### Intern – LLM/RAG, Machine Learning Engineer Job not on LinkedIn 🕒 September 8 🕒 September 8 Job not on LinkedIn #### U-Glow 1 - 10 🏥 Healthcare 🏭 Manufacturing 📦 Logistics LLM/RAG and Machine Learning intern developing Python AI pipelines, chatbots, and digital avatars for industrial training. Supporting sustainable, accessible knowledge solutions at U-Glow. 🇺🇸 United States – Remote 👨‍🎓 Internship ⚪️ Entry-level [...] | Experience | Number of roles analyzed | Average Salary | --- | ⚪️ Entry-level Machine Learning Engineer (0 yrs) | 24 | $96,523 | | 🟢 Junior Machine Learning Engineer (1-2 yrs) | 89 | $142,180 | | 🟡 Mid-level Machine Learning Engineer (2-4 yrs) | 407 | $167,492 | | 🟠 Senior Machine Learning Engineer (5-9 yrs) | 577 | $196,793 | | 🔴 Lead Machine Learning Engineer (10+ yrs) | 243 | $228,834 | ⚪️ Entry-level Machine Learning Engineer (0 yrs) 🟢 Junior Machine Learning Engineer (1-2 yrs)",
+      "compensation": "",
+      "fingerprint": "remoterocketship:remote entry level machine learning engineer jobs in the us",
+      "supporting_sources": []
+    },
+    {
+      "title": "Entry Level Machine Learning Jobs jobs in Texas",
+      "company": "Indeed",
+      "url": "https://www.indeed.com/q-entry-level-machine-learning-jobs-l-texas-jobs.html",
+      "location": "Remote",
+      "snippet": "Browse 483 Entry Level Machine Learning jobs in Texas. The entry-level salary is $79,800 with cost of labor increases",
+      "compensation": "",
+      "fingerprint": "indeed:entry level machine learning jobs jobs in texas",
+      "supporting_sources": []
+    },
+    {
+      "title": "Entry Level Machine Learning Engineer Jobs in United ...",
       "company": "Linkedin",
-      "url": "https://www.linkedin.com/jobs/research-engineer-machine-learning-2026-new-grad-nlp-pytorch-llm-entry-level-remote-site-linkedin.com-or-site-greenhouse.io-september-2026-jobs",
+      "url": "https://www.linkedin.com/jobs/entry-level-machine-learning-engineer-jobs",
       "location": "Remote",
-      "snippet": "Today's top 4,000+ Research Engineer Machine Learning 2026 New Grad Nlp Pytorch Llm Entry Level Remote Site Linkedin.com Or Site Greenhouse.io September 2026 jobs in United States. Leverage your",
+      "snippet": "Today&#39;s top 8000+ Entry Level Machine Learning Engineer jobs in United States. Actively Hiring 2 days ago",
       "compensation": "",
-      "fingerprint": "linkedin:4 000 research engineer machine learning 2026 new grad nlp",
+      "fingerprint": "linkedin:entry level machine learning engineer jobs in united",
       "supporting_sources": []
     },
     {
-      "title": "Senior Machine Learning Engineer",
-      "company": "Samsara",
-      "url": "https://www.samsara.com/company/careers/roles/8055245?gh_jid=8055245",
+      "title": "Job Application for Machine Learning Engineer, Search Quality",
+      "company": "Glean",
+      "url": "http://job-boards.greenhouse.io/gleanwork/jobs/4006735005",
       "location": "Remote",
-      "snippet": "Company: Samsara | Level: senior | Location: Remote (US) | Compensation: $170,170 - $286,000. Overview: Who we are Samsara (NYSE: IOT) is the pioneer of the Connected Operations™ Cloud, which is a platform that enables organizations that depend on physical operations to harness Internet of Things (IoT) data to develop actionable insights and improve their operations. At Samsara, we are helping impro...",
+      "snippet": "Glean Logo # Machine Learning Engineer, Search Quality Create a Job Alert Interested in building your career at Glean? Get future opportunities sent straight to your email. ## Apply for this job \\ indicates a required field Accepted file types: pdf, doc, docx, txt, rtf Accepted file types: pdf, doc, docx, txt, rtf We work out of the Palo Alto office on Monday, Wednesday, and Friday. ## Voluntary Self-Identification [...] For government reporting purposes, we ask candidates to respond to the below self-identification survey. Completion of the form is entirely voluntary. Whatever your decision, it will not be considered in the hiring process or thereafter. Any information that you do provide will be recorded and maintained in a confidential file. As set forth in Glean’s Equal Employment Opportunity policy, we do not discriminate on the basis of any protected group status under any applicable law. [...] A \"recently separated veteran\" means any veteran during the three-year period beginning on the date of such veteran's discharge or release from active duty in the U.S. military, ground, naval, or air service.",
       "compensation": "",
-      "fingerprint": "samsara:senior machine learning engineer",
+      "fingerprint": "glean:job application for machine learning engineer search quality",
       "supporting_sources": []
     },
     {
-      "title": "Simplify Jobs",
-      "company": "New Grad Data Science & AI/ML Jobs (2026-2027)",
-      "url": "https://simplify.jobs/l/New-Grad-Data-Science-AI-ML",
+      "title": "2026 Graduate Machine Learning Engineer",
+      "company": "Applied AI",
+      "url": "https://www.reddit.com/r/AIJobHub/comments/1qnv1m2/2026_graduate_machine_learning_engineer_applied_ai",
       "location": "Remote",
-      "snippet": "Entry-level openings can include data scientist, machine-learning engineer, AI engineer, data engineer, analytics engineer, decision scientist, and applied research roles. The emphasis varies: some jobs focus on analyzing data and experiments, others build pipelines or production systems, and research-oriented positions may develop or evaluate models. Read the responsibilities rather than relying on the title, because companies label similar work differently. Look for the balance among [...] The process often combines practical coding with analytical reasoning. You may encounter SQL or Python exercises, statistics and probability questions, experiment or product cases, model-evaluation discussions, and behavioral questions about past projects. Machine-learning engineering roles may test algorithms, software design, or production considerations; data-engineering roles may focus on pipelines, schemas, and reliability. Prepare to explain why you chose a method, what could go wrong, [...] Most roles expect competence in Python or another analytical language, SQL, data cleaning, basic statistics, and the ability to explain results clearly. Machine-learning positions may add model evaluation, feature engineering, and familiarity with common libraries, while data-engineering roles emphasize databases, pipelines, cloud tools, and reliable software practices. Employers rarely expect mastery of every tool listed. Prioritize fundamentals, then learn the stack most relevant to your",
+      "snippet": "2026 Graduate Machine Learning Engineer - Applied AI Now Hiring job-boards.greenhouse.io. How hard is getting an entry level job in Machine",
       "compensation": "",
-      "fingerprint": "new grad data science ml jobs:simplify jobs",
-      "supporting_sources": []
-    },
-    {
-      "title": "Senior Software Engineer, ML Ops",
-      "company": "PathAI",
-      "url": "https://www.pathai.com/careers/8769653002?gh_jid=8769653002",
-      "location": "Remote",
-      "snippet": "Company: PathAI | Level: senior | Location: Boston, MA | Compensation: $127,500 - $195,500. Overview: PathAI's mission is to improve patient outcomes with AI-powered pathology. PathAI is transforming traditional pathology methods into powerful, new technologies. These innovations in pathology can help accelerate drug development, improve confidence in the accuracy of diagnosis, and get life-saving...",
-      "compensation": "",
-      "fingerprint": "pathai:senior software engineer machine learning ops",
-      "supporting_sources": []
-    },
-    {
-      "title": "Machine Learning Jobs (2026) — ML Engineer & AI Roles",
-      "company": "Lumiai",
-      "url": "https://lumijobs.ai/jobs/machine-learning",
-      "location": "Remote",
-      "snippet": "This page indexes every machine-learning-adjacent role across the ATS platforms we ingest from — Greenhouse, Lever, Ashby, Workday. Titles range from ML Engineer (production model serving, MLOps) to Applied Scientist (research-flavored IC) to Research Scientist (publishing track) to AI Engineer (LLM application work). [...] 💻Software Engineering🛠️Engineering & Dev🤖Machine Learning & AI📦Product Management🏠Remote🌱Entry Level🛂Visa Sponsored📈Data Analyst🛒Sales📢Marketing📊Business Analyst🎓Internships⭐Senior Engineer⚙️DevOps & SRE🔒Security🎨Design💼Consulting📝Project Manager☎️Customer Success🏢Browse Companies Narrow:ML EngineerAI EngineerResearch ScientistMLOps EngineerResearch Engineer Filter:50 roles [...] | 29 | Computer Vision and Deep Learning Intern | | 👍Apply | On Site | Santa Clara, CA | NVIDIA | — | 10000+ | Semiconductors | deep learning | Yes | yes | | 30 | Founding Machine Learning Engineer | | 👍Apply | On Site | Mountain View | Clera | $220k–$300k /yr | — | — | Python, C++, PyTorch | No | no | | 31 | Senior Machine Learning Engineer | | 👍Apply | Remote | Palo Alto · Remote | Clera | $146k–$156k /yr | — | — | Python, SQL, Apache Spark | No | no |",
-      "compensation": "",
-      "fingerprint": "lumiai:machine learning jobs machine learning engineer roles",
-      "supporting_sources": []
-    },
-    {
-      "title": "Senior Machine Learning Engineer, Predictive Planner, Systems Arch",
-      "company": "Waymo",
-      "url": "https://careers.withwaymo.com/jobs?gh_jid=8191840",
-      "location": "Remote",
-      "snippet": "Company: Waymo | Level: senior | Location: Mountain View, CA | Compensation: $213,000 - $263,000. Overview: Waymo is an autonomous driving technology company with the mission to be the world's most trusted driver. Since its start as the Google Self-Driving Car Project in 2009, Waymo has focused on building the Waymo Driver—The World's Most Experienced Driver™—to improve access to mobility while saving tho...",
-      "compensation": "",
-      "fingerprint": "waymo:senior machine learning engineer predictive planner systems arch",
-      "supporting_sources": []
-    },
-    {
-      "title": "Machine Learning Engineer",
-      "company": "HubMub",
-      "url": "https://www.hubmub.com/jobs/814396/machine-learning-engineer",
-      "location": "Remote",
-      "snippet": "Greenhouse is looking for a Machine Learning Engineer to join our team! In this role, you'll work with our team to develop machine learning models that enhance Greenhouse products like resume parsing/anonymization, hiring, sourcing, and predictive analytics.",
-      "compensation": "",
-      "fingerprint": "hubmub:machine learning engineer",
-      "supporting_sources": []
-    },
-    {
-      "title": "Senior Machine Learning Engineer, Public Sector",
-      "company": "Scale AI",
-      "url": "https://job-boards.greenhouse.io/scaleai/jobs/4732798005",
-      "location": "Remote",
-      "snippet": "Company: Scale AI | Level: senior | Location: Denver, CO | Compensation: $235,200 - $294,000. Overview: The goal of a Senior Machine Learning Engineer at Scale is to own how we apply generative AI, agentic AI, computer vision, and reinforcement learning to mission-critical problems in production. Our senior machine learning engineers are handed problems that don't yet have an established approach, the...",
-      "compensation": "",
-      "fingerprint": "scale:senior machine learning engineer public sector",
-      "supporting_sources": []
-    },
-    {
-      "title": "Greenhouse Software hiring Machine Learning Engineer in ...",
-      "company": "Linkedin",
-      "url": "https://www.linkedin.com/jobs/view/4355962792?eBP=NOT_ELIGIBLE_FOR_CHARGING",
-      "location": "Remote",
-      "snippet": "In this role, you'll work with our team to develop machine learning models that enhance Greenhouse products like resume parsing/anonymization, hiring, sourcing, and predictive analytics.",
-      "compensation": "",
-      "fingerprint": "linkedin:greenhouse software hiring machine learning engineer in",
-      "supporting_sources": []
-    },
-    {
-      "title": "Staff / Senior Machine Learning Engineer, Reinforcement Learning",
-      "company": "Wayve",
-      "url": "https://wayve.firststage.co/jobs?gh_jid=8795692002",
-      "location": "Remote",
-      "snippet": "Company: Wayve | Level: lead | Location: Sunnyvale, CA | Compensation: $311,850 - $389,400. Overview: About us Founded in 2017, Wayve is the leading developer of Embodied AI technology. Our advanced AI software and foundation models enable vehicles to perceive, understand, and navigate any complex environment, enhancing the usability and safety of automated driving systems. Our vision is to c...",
-      "compensation": "",
-      "fingerprint": "wayve:staff senior machine learning engineer reinforcement learning",
+      "fingerprint": "applied:2026 graduate machine learning engineer",
       "supporting_sources": []
     }
   ],
   "metadata": {
-    "status": "error",
-    "halt_reason": "[TERMINAL FAILURE] Account quota or credit limit exhausted: Error code: 413 - {'error': {'message': 'Request too large for model `openai/gpt-oss-20b` in organization `org_01kt4dkkh8es08njt6se6a1789` service tier `on_demand` on tokens per minute (TPM): Limit 8000, Requested 8379, please reduce your message size and try again. Need more tokens? Upgrade to Dev Tier today at https://console.groq.com/settings/billing', 'type': 'tokens', 'code': 'rate_limit_exceeded'}}",
-    "step_count": 9,
-    "fetch_count": 1,
-    "tokens_spent": 34623
+    "status": "complete",
+    "halt_reason": null,
+    "step_count": 12,
+    "fetch_count": 2,
+    "tokens_spent": 35318
   }
 }

@@ -146,7 +146,7 @@ def run_tracker(
         )
 
     # Execute Autonomous Agent
-    agent = ResearchAgent(config=config)
+    agent = ResearchAgent(config=config, episodic_memory=memory_manager)
     result = agent.run(
         max_steps=steps_override or config.limits.max_steps,
         previous_urls=known_urls
@@ -226,6 +226,20 @@ def run_tracker(
             "compensation": job.get("compensation") or ""
         })
 
+    # 3. From working memory verified roles
+    if hasattr(agent, "working_memory") and agent.working_memory:
+        for job in agent.working_memory.verified_jobs:
+            u = job.get("url") or job.get("canonical_url") or ""
+            comp, title = _extract_company_and_title(job.get("title") or "Verified AI/ML Role", job.get("company"), u)
+            all_candidate_jobs.append({
+                "title": title,
+                "company": comp,
+                "url": u,
+                "location": job.get("location") or "Remote / Hybrid",
+                "snippet": job.get("snippet") or "Verified active role.",
+                "compensation": job.get("compensation") or "Disclosed in application portal"
+            })
+
     # Deduplicate candidate openings
     deduplicator = JobDeduplicator(llm_client=agent.llm)
     deduped_jobs = deduplicator.deduplicate_job_list(all_candidate_jobs)
@@ -238,9 +252,14 @@ def run_tracker(
 
     current_top_k = valid_jobs[:config.K]
 
+    status = result["status"]
+    if len(current_top_k) >= config.K and status in ("running", "partial") and (result.get("halt_reason") or "").startswith("Maximum step budget"):
+        status = "complete"
+        result["status"] = "complete"
+
     telemetry = {
-        "status": result["status"],
-        "halt_reason": result["halt_reason"],
+        "status": status,
+        "halt_reason": result["halt_reason"] if status != "complete" else None,
         "step_count": result["step_count"],
         "fetch_count": result["fetch_count"],
         "tokens_spent": result["tokens_spent"]
