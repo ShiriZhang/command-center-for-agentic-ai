@@ -11,6 +11,11 @@ from urllib.parse import urlparse
 
 from tracker.memory.dedup import (
     ATS_DOMAINS,
+    PLATFORM_DOMAINS,
+    PLATFORM_NAMES,
+    SEO_COMPANY_BLACKLIST,
+    is_platform_url,
+    is_platform_name,
     slugify,
     clean_job_title,
     generate_fingerprint,
@@ -31,6 +36,29 @@ ENTRY_EXEMPTION_PATTERN = re.compile(
     re.IGNORECASE
 )
 
+# Defect 3: Regex patterns to identify non-leaf hub, search, category, and advice URLs
+NON_LEAF_URL_PATTERNS = re.compile(
+    r"(?:/(?:advice|blog|articles?|news|search|category|categories|hub|career-advice|postings?/all|tag|salaries|reviews|companies)(?:/|$|\?))"
+    r"|(?:/q-[^/]+)"
+    r"|(?:/l/[^/]+)"
+    r"|(?:[?&](?:q|query|search|k|keyword)=)"
+    r"|(?:/jobs/?$)"
+    r"|(?:/careers/?$)",
+    re.IGNORECASE
+)
+
+# ATS direct leaf job posting patterns (with job requisition ID)
+ATS_LEAF_PATTERNS = [
+    re.compile(r"boards\.greenhouse\.io/[^/]+/jobs/\d+", re.IGNORECASE),
+    re.compile(r"jobs\.lever\.co/[^/]+/[0-9a-fA-F-]+", re.IGNORECASE),
+    re.compile(r"jobs\.ashbyhq\.com/[^/]+/[0-9a-fA-F-]+", re.IGNORECASE),
+    re.compile(r"[^/]+\.myworkdayjobs\.com/[^/]+/job/[^/]+", re.IGNORECASE),
+    re.compile(r"jobs\.smartrecruiters\.com/[^/]+/[^/]+", re.IGNORECASE),
+    re.compile(r"apply\.workable\.com/[^/]+/j/[^/]+", re.IGNORECASE),
+    re.compile(r"[^/]+\.bamboohr\.com/careers/\d+", re.IGNORECASE),
+    re.compile(r"[^/]+\.rippling-ats\.com/job/[^/]+", re.IGNORECASE),
+]
+
 
 class SemanticMemory:
     """
@@ -45,6 +73,81 @@ class SemanticMemory:
     def is_ats_url(url: str) -> bool:
         """Determines if a URL points to an authentic corporate ATS portal."""
         return is_ats_url(url)
+
+    @staticmethod
+    def is_leaf_job_url(url: str) -> Tuple[bool, str]:
+        """
+        Validates whether a URL points to an individual leaf job posting rather than
+        an aggregate list, search result page, or blog article (Defect 3).
+        """
+        if not url:
+            return True, "No URL provided"
+
+        full_url = url.lower()
+        parsed = urlparse(full_url)
+        path = parsed.path
+
+        # 1. Reject aggregate/search/advice/blog URL patterns
+        if NON_LEAF_URL_PATTERNS.search(full_url):
+            return False, f"Disqualified: URL matches hub/aggregate/advice/search pattern ({url})"
+
+        # 2. Check for explicit ATS leaf postings (Greenhouse/Lever/Ashby with ID)
+        for pat in ATS_LEAF_PATTERNS:
+            if pat.search(full_url):
+                return True, "Verified direct ATS leaf posting"
+
+        # 3. Reject directory roots like /jobs or /careers
+        clean_path = path.strip("/")
+        if clean_path in ("jobs", "careers", "search", "all-jobs"):
+            return False, f"Disqualified: URL path '{path}' is a directory root"
+
+        return True, "Leaf posting"
+
+    @staticmethod
+    def is_leaf_ats_url(url: str) -> bool:
+        """Determines if a URL strictly matches a direct leaf corporate ATS path with job ID."""
+        if not url:
+            return False
+        return any(pat.search(url.lower()) for pat in ATS_LEAF_PATTERNS)
+
+    @staticmethod
+    def validate_content_singularity(content: str, title: str = "") -> Tuple[bool, str]:
+        """
+        Validates that the content text represents a SINGLE atomic job posting rather
+        than an aggregate multi-company list, directory, or search results page (Defect 3).
+        """
+        if not content:
+            return True, "No content to validate"
+
+        text = content.lower()
+
+        # 1. Search/catalog aggregator markers
+        catalog_markers = [
+            r"\b\d+\s+(?:jobs?|openings?)\s+(?:found|available)\b",
+            r"\bshowing\s+\d+\s*[-–to]\s*\d+\s+of\s+\d+\b",
+            r"\bsearch\s+results\s+(?:for|matching)\b",
+            r"\bbrowse\s+all\s+\d+\s+jobs\b",
+            r"\bpage\s+\d+\s+of\s+\d+\b",
+            r"\btop\s+\d+\s+companies\s+hiring\b",
+            r"\bexplore\s+\d+\s+(?:more\s+)?jobs\b",
+            r"\bsimilar\s+searches\b"
+        ]
+        for marker in catalog_markers:
+            if re.search(marker, text):
+                return False, f"Disqualified: Aggregator search catalog marker detected ({marker})"
+
+        # 2. Multiple distinct company name markers
+        comp_matches = re.findall(r"\bcompany\s*[:\-]\s*([a-z0-9\s&.-]{3,30})", text)
+        distinct_comps = {c.strip() for c in comp_matches if c.strip()}
+        if len(distinct_comps) >= 3:
+            return False, f"Disqualified: Multiple distinct companies ({len(distinct_comps)}) listed in page text"
+
+        # 3. Excessive apply buttons indicative of job boards
+        apply_buttons = len(re.findall(r"\b(?:apply\s+now|apply\s+for\s+this\s+job|quick\s+apply|easy\s+apply)\b", text))
+        if apply_buttons >= 5:
+            return False, f"Disqualified: High frequency of apply buttons ({apply_buttons}) indicates aggregate job board"
+
+        return True, "Valid single job posting"
 
     @staticmethod
     def canonicalize_company(company: str) -> str:
@@ -181,6 +284,12 @@ class SemanticMemory:
         snippet = candidate.get("snippet") or candidate.get("description") or ""
         url = candidate.get("apply_url") or candidate.get("url") or ""
         posted_at = candidate.get("posted_at") or candidate.get("published_at") or candidate.get("date")
+
+        # Step 0: Leaf Job URL check (Defect 3)
+        if url:
+            is_leaf, leaf_reason = self.is_leaf_job_url(url)
+            if not is_leaf:
+                return False, 0, leaf_reason
 
         # Step 1: Seniority filter
         is_qual, sen_reason = self.filter_seniority(title, snippet)

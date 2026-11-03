@@ -24,6 +24,7 @@ from tracker.llm import (
 )
 from tracker.memory.episodic import EpisodicMemory
 from tracker.memory.working import WorkingMemory
+from tracker.memory.semantic import SemanticMemory
 from tracker.tools.fetch import fetch_article
 from tracker.tools.search import search_web
 from tracker.tools.finish import finish
@@ -265,12 +266,17 @@ class ResearchAgent:
             fetch_res = fetch_article(url, episodic_memory=self.episodic_memory)
             self.fetched_articles.append(fetch_res)
             if fetch_res.get("status") == "fetched" and self.working_memory:
-                self.working_memory.add_verified_job({
-                    "title": fetch_res.get("title", "Verified Role"),
-                    "url": url,
-                    "source": "fetch",
-                    "snippet": (fetch_res.get("content") or "")[:300]
-                })
+                content = fetch_res.get("content") or ""
+                title = fetch_res.get("title", "Verified Role")
+                is_leaf, _ = SemanticMemory.is_leaf_job_url(url)
+                is_single, _ = SemanticMemory.validate_content_singularity(content, title)
+                if is_leaf and is_single:
+                    self.working_memory.add_verified_job({
+                        "title": title,
+                        "url": url,
+                        "source": "fetch",
+                        "snippet": content[:300]
+                    })
             return fetch_res, False
 
         elif tool_name == "finish":

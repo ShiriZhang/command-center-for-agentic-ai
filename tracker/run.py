@@ -24,6 +24,15 @@ import httpx
 from tracker.agent import ResearchAgent
 from tracker.config import config
 from tracker.memory import RecrawlMemoryManager, JobDeduplicator
+from tracker.memory.dedup import (
+    PLATFORM_NAMES,
+    PLATFORM_DOMAINS,
+    SEO_COMPANY_BLACKLIST,
+    is_platform_name,
+    is_platform_url
+)
+from tracker.memory.semantic import SemanticMemory
+from tracker.tools.fetch import extract_compensation_from_text, extract_location_from_text
 from tracker.reporter import (
     generate_run1_report,
     generate_run2_report,
@@ -152,92 +161,219 @@ def run_tracker(
         previous_urls=known_urls
     )
 
+    ROLE_KEYWORDS = [
+        "data scientist", "ai engineer", "ml engineer", "machine learning engineer",
+        "software engineer", "new grad", "early career", "entry level", "deep learning",
+        "applied scientist", "computer vision", "nlp", "llm", "engineer", "engineering",
+        "scientist", "developer", "intern", "internship", "researcher", "analyst",
+        "fellow", "specialist", "architect", "programmer", "modeler"
+    ]
+
+    def _has_role_keyword(text: str) -> bool:
+        t = text.lower()
+        return any(kw in t for kw in ROLE_KEYWORDS)
+
+    def _is_invalid_company(comp_name: str) -> bool:
+        if not comp_name:
+            return True
+        c = comp_name.strip()
+        if c.lower() in ("company", "tech company", "untitled", "unknown", "n/a"):
+            return True
+        if is_platform_name(c):
+            return True
+        if SEO_COMPANY_BLACKLIST.search(c):
+            return True
+        return False
+
     def _extract_company_and_title(raw_title: str, raw_comp: Optional[str], u: str) -> Tuple[str, str]:
         comp = (raw_comp or "").strip()
         tit = (raw_title or "AI/ML Role").strip()
 
-        # If comp already provided and valid
-        if comp and comp not in ("Company", "Tech Company", "Untitled"):
-            for sep in [" - ", " | ", ": ", " – "]:
-                prefix = f"{comp}{sep}"
-                if tit.lower().startswith(prefix.lower()):
-                    tit = tit[len(prefix):].strip()
-            return comp, tit
+        # Invalidate platform or SEO titles passed as company
+        if _is_invalid_company(comp):
+            comp = ""
 
-        # Delimiters in title: "Company - Title" or "Title at Company"
-        for sep in [" - ", " | ", " – "]:
-            if sep in tit:
-                parts = [p.strip() for p in tit.split(sep, 1)]
-                if len(parts) == 2:
-                    p0, p1 = parts[0], parts[1]
-                    role_keywords = ["engineer", "scientist", "developer", "intern", "researcher", "analyst", "fellow"]
-                    if any(kw in p0.lower() for kw in role_keywords):
-                        return p1, p0
-                    return p0, p1
-
-        if " at " in tit:
-            parts = [p.strip() for p in tit.split(" at ", 1)]
-            if len(parts) == 2:
-                return parts[1], parts[0]
-
-        # URL fallback: ATS domain or corporate netloc
+        # Pre-extract authoritative ATS company if available from URL
+        ats_company = ""
         if u:
             try:
                 parsed = urlparse(u)
                 netloc = parsed.netloc.lower()
                 path_parts = [p for p in parsed.path.strip("/").split("/") if p]
                 if any(k in netloc for k in ["greenhouse.io", "lever.co", "ashbyhq.com"]) and path_parts:
-                    return path_parts[0].replace("-", " ").title(), tit
-                domain_parts = netloc.replace("www.", "").replace("careers.", "").replace("jobs.", "").split(".")
-                if domain_parts and domain_parts[0]:
-                    return domain_parts[0].capitalize(), tit
+                    ats_company = path_parts[0].replace("-", " ").title()
+                elif "myworkdayjobs.com" in netloc and path_parts:
+                    ats_company = netloc.split(".")[0].replace("-", " ").title()
             except Exception:
                 pass
 
-        return comp or "Tech Company", tit
+        if ats_company and not comp:
+            comp = ats_company
 
-    # Extract and deduplicate discovered job roles
+        # Delimiters in title: " - ", " | ", " – ", " : ", " · "
+        for sep in [" - ", " | ", " – ", " : ", " · "]:
+            if sep in tit:
+                parts = [p.strip() for p in tit.split(sep) if p.strip()]
+                valid_parts = [
+                    p for p in parts
+                    if not is_platform_name(p) and not SEO_COMPANY_BLACKLIST.search(p)
+                ]
+                if len(valid_parts) == 3:
+                    p0, p1, p2 = valid_parts[0], valid_parts[1], valid_parts[2]
+                    if _has_role_keyword(p0) and not _has_role_keyword(p2):
+                        tit = f"{p0} - {p1}"
+                        if not comp or _is_invalid_company(comp):
+                            comp = p2
+                    elif not _has_role_keyword(p0) and _has_role_keyword(p1):
+                        tit = f"{p1} - {p2}"
+                        if not comp or _is_invalid_company(comp):
+                            comp = p0
+                    else:
+                        tit = f"{p0} - {p1}"
+                    break
+                elif len(valid_parts) == 2:
+                    p0, p1 = valid_parts[0], valid_parts[1]
+                    p0_has_role = _has_role_keyword(p0)
+                    p1_has_role = _has_role_keyword(p1)
+
+                    if p0_has_role and not p1_has_role:
+                        tit = p0
+                        if not comp or _is_invalid_company(comp):
+                            comp = p1
+                    elif p1_has_role and not p0_has_role:
+                        tit = p1
+                        if not comp or _is_invalid_company(comp):
+                            comp = p0
+                    elif p0_has_role and p1_has_role:
+                        tit = f"{p0} - {p1}"
+                    else:
+                        if not comp or _is_invalid_company(comp):
+                            comp = p0
+                        tit = p1
+                    break
+                elif len(valid_parts) == 1:
+                    tit = valid_parts[0]
+                    break
+
+        # Handle "Role at Company" pattern
+        if " at " in tit.lower():
+            at_idx = tit.lower().find(" at ")
+            left_part = tit[:at_idx].strip()
+            right_part = tit[at_idx + 4:].strip()
+            if _has_role_keyword(left_part):
+                tit = left_part
+                if not comp and not _is_invalid_company(right_part):
+                    comp = right_part
+
+        # Fallback company from URL
+        if not comp or _is_invalid_company(comp):
+            if ats_company:
+                comp = ats_company
+            elif u:
+                try:
+                    parsed = urlparse(u)
+                    netloc = parsed.netloc.lower()
+                    if not is_platform_url(u):
+                        domain_parts = netloc.replace("www.", "").replace("careers.", "").replace("jobs.", "").split(".")
+                        if domain_parts and domain_parts[0] and domain_parts[0] not in ("com", "org", "net"):
+                            comp = domain_parts[0].capitalize()
+                except Exception:
+                    pass
+
+        if _is_invalid_company(comp):
+            comp = ats_company or "Tech Company"
+
+        # Strip company name from title if duplicate
+        for sep in [" - ", " | ", ": ", " – "]:
+            prefix = f"{comp}{sep}"
+            if tit.lower().startswith(prefix.lower()):
+                tit = tit[len(prefix):].strip()
+            suffix = f"{sep}{comp}"
+            if tit.lower().endswith(suffix.lower()):
+                tit = tit[:-len(suffix)].strip()
+
+        # Remove platform noise from title
+        for p in PLATFORM_NAMES:
+            tit = re.sub(rf"\s*[-|–]\s*{re.escape(p)}\b.*$", "", tit, flags=re.IGNORECASE).strip()
+
+        return comp, tit
+
+    # Extract, filter, and deduplicate discovered job roles
     all_candidate_jobs: List[Dict[str, Any]] = []
 
     # 1. From verified fetched articles
     for art in agent.fetched_articles:
         if art.get("status") == "fetched":
             u = art.get("url") or art.get("current_url") or ""
+            # Defect 3: Filter non-leaf URLs
+            is_leaf, _ = SemanticMemory.is_leaf_job_url(u)
+            if not is_leaf:
+                continue
+
+            content = art.get("content") or ""
+            # Defect 3: Verify content singularity (reject multi-job lists)
+            is_single, _ = SemanticMemory.validate_content_singularity(content, art.get("title") or "")
+            if not is_single:
+                continue
+
             comp, title = _extract_company_and_title(art.get("title") or "Verified Machine Learning Engineer", art.get("company"), u)
+            loc = art.get("location") or extract_location_from_text(content) or "Remote / Hybrid"
+            compensation = art.get("compensation") or extract_compensation_from_text(content) or "Disclosed in application portal"
             all_candidate_jobs.append({
                 "title": title,
                 "company": comp,
                 "url": u,
-                "location": art.get("location") or "Remote / Hybrid",
-                "snippet": (art.get("content") or "")[:400],
-                "compensation": art.get("compensation") or "Disclosed in application portal"
+                "location": loc,
+                "snippet": content[:400],
+                "compensation": compensation
             })
 
     # 2. From candidate discovery search hits
     for job in agent.extracted_jobs:
-        u = job.get("url") or ""
+        u = job.get("url") or job.get("apply_url") or ""
+        # Defect 3: Filter non-leaf URLs
+        is_leaf, _ = SemanticMemory.is_leaf_job_url(u)
+        if not is_leaf:
+            continue
+
+        snippet = job.get("snippet") or ""
+        # Defect 3: Verify content singularity
+        is_single, _ = SemanticMemory.validate_content_singularity(snippet, job.get("title") or "")
+        if not is_single:
+            continue
+
         comp, title = _extract_company_and_title(job.get("title") or "AI/ML Role", job.get("company"), u)
+        loc = job.get("location") or extract_location_from_text(snippet) or "Remote"
+        compensation = job.get("compensation") or job.get("salary") or extract_compensation_from_text(snippet) or ""
         all_candidate_jobs.append({
             "title": title,
             "company": comp,
             "url": u,
-            "location": job.get("location") or "Remote",
-            "snippet": job.get("snippet") or "",
-            "compensation": job.get("compensation") or ""
+            "location": loc,
+            "snippet": snippet,
+            "compensation": compensation
         })
 
     # 3. From working memory verified roles
     if hasattr(agent, "working_memory") and agent.working_memory:
         for job in agent.working_memory.verified_jobs:
             u = job.get("url") or job.get("canonical_url") or ""
+            # Defect 3: Filter non-leaf URLs
+            is_leaf, _ = SemanticMemory.is_leaf_job_url(u)
+            if not is_leaf:
+                continue
+
+            snippet = job.get("snippet") or "Verified active role."
             comp, title = _extract_company_and_title(job.get("title") or "Verified AI/ML Role", job.get("company"), u)
+            loc = job.get("location") or extract_location_from_text(snippet) or "Remote / Hybrid"
+            compensation = job.get("compensation") or extract_compensation_from_text(snippet) or "Disclosed in application portal"
             all_candidate_jobs.append({
                 "title": title,
                 "company": comp,
                 "url": u,
-                "location": job.get("location") or "Remote / Hybrid",
-                "snippet": job.get("snippet") or "Verified active role.",
-                "compensation": job.get("compensation") or "Disclosed in application portal"
+                "location": loc,
+                "snippet": snippet,
+                "compensation": compensation
             })
 
     # Deduplicate candidate openings
@@ -251,6 +387,9 @@ def run_tracker(
     ]
 
     current_top_k = valid_jobs[:config.K]
+    # Defect 2: Explicitly inject sequential 1-based rank into each item
+    for idx, job in enumerate(current_top_k, 1):
+        job["rank"] = idx
 
     status = result["status"]
     if len(current_top_k) >= config.K and status in ("running", "partial") and (result.get("halt_reason") or "").startswith("Maximum step budget"):

@@ -327,6 +327,10 @@ def search_web(
 
     for item in all_candidates:
         raw_url = item.get("url") or item.get("apply_url") or ""
+        # Defect 3: Exclude aggregate, hub, advice, and search list URLs
+        is_leaf, _ = semantic.is_leaf_job_url(raw_url)
+        if not is_leaf:
+            continue
         canon = _canonical_url(raw_url)
         if not canon or canon in seen_urls:
             continue

@@ -99,7 +99,7 @@ class TrackerDevelopmentItem(BaseModel):
     Guarantees strict source provenance and multi-run differential status badges.
     """
     id: Optional[int] = None
-    rank: int = 1
+    rank: Optional[int] = None
     title: str = "AI/ML Role"
     company: str = "Company"
     primary_url: str = Field(

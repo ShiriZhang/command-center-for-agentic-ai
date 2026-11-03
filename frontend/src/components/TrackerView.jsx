@@ -548,7 +548,9 @@ export default function TrackerView() {
 
         {/* Cards Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {(activeRun?.developments || []).map((job, idx) => (
+          {[...(activeRun?.developments || [])]
+            .sort((a, b) => (a.rank || 0) - (b.rank || 0))
+            .map((job, idx) => (
             <div
               key={job.id || idx}
               className="group relative rounded-2xl bg-slate-900 border border-slate-800/90 hover:border-slate-700/80 p-5 transition-all shadow-md hover:shadow-xl flex flex-col justify-between space-y-4"
@@ -558,7 +560,7 @@ export default function TrackerView() {
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <span className="w-6 h-6 rounded-lg bg-slate-800 text-slate-200 text-xs font-black flex items-center justify-center">
-                      #{job.rank || idx + 1}
+                      #{job.rank ?? (idx + 1)}
                     </span>
                     <div className="flex items-center gap-1.5 text-xs font-bold text-slate-300">
                       <Building2 className="w-3.5 h-3.5 text-slate-400" />

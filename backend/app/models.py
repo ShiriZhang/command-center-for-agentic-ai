@@ -84,7 +84,8 @@ class TrackerRun(Base):
         "TrackerDevelopment",
         back_populates="run",
         cascade="all, delete-orphan",
-        passive_deletes=True
+        passive_deletes=True,
+        order_by="TrackerDevelopment.rank"
     )
 
 

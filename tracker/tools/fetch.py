@@ -127,6 +127,123 @@ def clean_html_to_text(html_content: str) -> Tuple[str, str]:
     return title, clean_text
 
 
+# --------------------------------------------------------------------------
+# Regex Parsing Utilities for Compensation & Location (Defect 4)
+# --------------------------------------------------------------------------
+
+SALARY_PATTERN = re.compile(
+    r"(?:"
+    r"\$\s*\d{2,3}(?:,\d{3})*(?:\s*[kK])?\s*(?:-|–|to)\s*\$?\s*\d{2,3}(?:,\d{3})*(?:\s*[kK])?(?:\s*USD)?(?:\s*(?:\/|per|a)\s*(?:yr|year|annum|hr|hour))?"
+    r"|\$\s*\d{2,3}(?:\.\d{2})?\s*(?:-|–|to)\s*\$?\s*\d{2,3}(?:\.\d{2})?(?:\s*USD)?\s*(?:\/|per|a)\s*(?:hr|hour)"
+    r"|\$\s*\d{2,3},\d{3}(?:,\d{3})*(?:\s*USD)?(?:\s*(?:\/|per|a)\s*(?:yr|year|annum|hr|hour))?"
+    r"|\$\s*\d{2,3}\s*[kK](?:\s*USD)?(?:\s*(?:\/|per|a)\s*(?:yr|year|annum|hr|hour))?"
+    r"|\$\s*\d{2,3}(?:\.\d{2})?\s*(?:\/|per|a)\s*(?:hr|hour)"
+    r")",
+    re.IGNORECASE
+)
+
+COMMON_CITIES = [
+    ("New York", "NY"), ("NYC", "NY"), ("San Francisco", "CA"), ("SF", "CA"),
+    ("Seattle", "WA"), ("Austin", "TX"), ("Boston", "MA"), ("Cambridge", "MA"),
+    ("Mountain View", "CA"), ("Sunnyvale", "CA"), ("Palo Alto", "CA"),
+    ("San Jose", "CA"), ("San Diego", "CA"), ("Los Angeles", "CA"),
+    ("Chicago", "IL"), ("Denver", "CO"), ("Atlanta", "GA"), ("Pittsburgh", "PA"),
+    ("Redmond", "WA"), ("Menlo Park", "CA"), ("Cupertino", "CA"),
+    ("Toronto", "ON"), ("Vancouver", "BC"), ("London", "UK")
+]
+
+CITY_STATE_REGEX = re.compile(
+    r"\b(" + "|".join([re.escape(c[0]) for c in COMMON_CITIES]) + r")"
+    r"(?:\s*,\s*([A-Za-z]{2}))?\b",
+    re.IGNORECASE
+)
+
+WORK_MODE_REGEX = re.compile(
+    r"\b(hybrid|remote|on-site|onsite|in-person)\b",
+    re.IGNORECASE
+)
+
+
+def extract_compensation_from_text(text: str) -> Optional[str]:
+    """
+    Extracts and normalizes compensation / salary range from job description text.
+    Matches patterns such as:
+    - $160,000 - $195,000 / yr
+    - $175,000 - $210,000
+    - $140k - $170k USD
+    - $65.00 - $85.00 / hr
+    """
+    if not text:
+        return None
+
+    # Step 1: Scan for salary patterns
+    m = SALARY_PATTERN.search(text)
+    if not m:
+        return None
+
+    val = re.sub(r"\s+", " ", m.group(0).strip())
+    # Normalize: append / yr if it's an annual salary without unit
+    if not re.search(r"\b(yr|year|annum|hr|hour)\b", val, re.I):
+        digits = [int(s) for s in re.findall(r"\d+", val.replace(",", ""))]
+        if any(d >= 1000 for d in digits) or "k" in val.lower():
+            val = f"{val} / yr"
+
+    return val
+
+
+def extract_location_from_text(text: str) -> Optional[str]:
+    """
+    Extracts structured location and workplace modality (Remote, Hybrid, On-site) from text,
+    avoiding mechanical fallback to pure 'Remote'.
+    """
+    if not text:
+        return None
+
+    # Step 1: Check for labeled location sections
+    loc_label_pattern = re.compile(
+        r"(?:location|locations|office|based\s+in|workplace)\s*[:\-–]\s*([^\n\.\;]{3,60})",
+        re.IGNORECASE
+    )
+    m = loc_label_pattern.search(text)
+    candidate_snippet = m.group(1).strip() if m else text[:1500]
+
+    # Detect modality (Hybrid / Remote / On-site)
+    mode_match = WORK_MODE_REGEX.search(candidate_snippet) or WORK_MODE_REGEX.search(text[:3000])
+    mode_str = None
+    if mode_match:
+        raw_mode = mode_match.group(1).lower()
+        if "hybrid" in raw_mode:
+            mode_str = "Hybrid"
+        elif "on-site" in raw_mode or "onsite" in raw_mode or "in-person" in raw_mode:
+            mode_str = "On-site"
+        elif "remote" in raw_mode:
+            mode_str = "Remote"
+
+    # Detect city/state
+    city_match = CITY_STATE_REGEX.search(candidate_snippet) or CITY_STATE_REGEX.search(text[:3000])
+    city_str = None
+    if city_match:
+        matched_name = city_match.group(1).strip()
+        state_code = city_match.group(2)
+        canonical = None
+        for c_name, c_state in COMMON_CITIES:
+            if c_name.lower() == matched_name.lower():
+                canonical = f"{c_name}, {c_state}" if c_name.upper() != "NYC" else "New York, NY"
+                break
+        city_str = canonical or (f"{matched_name}, {state_code.upper()}" if state_code else matched_name)
+
+    if city_str and mode_str:
+        if mode_str == "Remote":
+            return f"{city_str} / Remote"
+        return f"{city_str} ({mode_str})"
+    elif city_str:
+        return city_str
+    elif mode_str:
+        return mode_str
+
+    return None
+
+
 def fetch_article(
     url: str,
     episodic_memory: Optional[Any] = None
@@ -166,6 +283,8 @@ def fetch_article(
                 "current_url": url,
                 "title": "Cached Active Article",
                 "content": "Retained active posting from previous crawl run.",
+                "location": "Remote / Hybrid",
+                "compensation": None,
                 "status": "cached_active",
                 "cached": True,
                 "error": None,
@@ -272,6 +391,8 @@ def fetch_article(
             html_text = raw_bytes.decode("utf-8", errors="replace")
 
         title, clean_text = clean_html_to_text(html_text)
+        compensation = extract_compensation_from_text(clean_text)
+        location = extract_location_from_text(clean_text)
         latency_ms = int((time.time() - start_time) * 1000)
 
         return {
@@ -279,6 +400,8 @@ def fetch_article(
             "current_url": current_url,
             "title": title or "Untitled Article",
             "content": clean_text,
+            "location": location or "Remote / Hybrid",
+            "compensation": compensation,
             "status": "fetched",
             "error": None,
             "byte_size": byte_size,

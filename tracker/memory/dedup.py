@@ -26,6 +26,76 @@ ATS_DOMAINS = (
     "bamboohr.com"
 )
 
+# Known job board / aggregator platform domains (Defect 1)
+PLATFORM_DOMAINS = (
+    "indeed.com",
+    "builtin.com",
+    "builtinnyc.com",
+    "research.com",
+    "simplify.jobs",
+    "linkedin.com",
+    "glassdoor.com",
+    "ziprecruiter.com",
+    "monster.com",
+    "wellfound.com",
+    "angellist.com",
+    "levels.fyi",
+    "handshake.com",
+    "joinhandshake.com",
+    "wayup.com",
+    "dice.com",
+    "careerbuilder.com",
+    "jobvite.com",
+    "simplyhired.com",
+    "adzuna.com"
+)
+
+# Platform names that must NEVER be treated as a job Title or hiring Company
+PLATFORM_NAMES = (
+    "indeed",
+    "built in",
+    "builtin",
+    "builtin nyc",
+    "research.com",
+    "simplify",
+    "simplify jobs",
+    "linkedin",
+    "glassdoor",
+    "ziprecruiter",
+    "monster",
+    "wellfound",
+    "angellist",
+    "levels.fyi",
+    "handshake",
+    "wayup",
+    "dice",
+    "careerbuilder"
+)
+
+# SEO headline phrases that must NEVER be assigned as a company name
+SEO_COMPANY_BLACKLIST = re.compile(
+    r"\b(now\s+hiring|\d+[\+,\s]*jobs?|job\s+openings?|search\s+jobs?|apply\s+to|best\s+companies|"
+    r"explore\s+jobs?|browse\s+jobs?|find\s+jobs?|top\s+\d+|salaries|reviews|advice|salary\s+guide)\b",
+    re.IGNORECASE
+)
+
+
+def is_platform_url(url: str) -> bool:
+    """Returns True if the URL belongs to a general aggregator / job board platform."""
+    if not url:
+        return False
+    parsed = urlparse(url.lower())
+    netloc = parsed.netloc
+    return any(p in netloc for p in PLATFORM_DOMAINS)
+
+
+def is_platform_name(name: str) -> bool:
+    """Returns True if the given string is a platform name rather than a company or title."""
+    if not name:
+        return False
+    clean = re.sub(r"[^a-z0-9\s.]", "", name.lower()).strip()
+    return any(p == clean or f" {p} " in f" {clean} " or clean.endswith(f" {p}") or clean.startswith(f"{p} ") for p in PLATFORM_NAMES)
+
 
 # ==============================================================================
 # 1. Normalization & Fingerprinting Utilities
@@ -65,9 +135,12 @@ def are_companies_matching(comp1: str, comp2: str) -> bool:
 
 def clean_job_title(title: str) -> str:
     """
-    Cleans and standardizes job titles by standardizing seniority abbreviations
-    and removing company prefixes if prepended.
+    Cleans and standardizes job titles by standardizing seniority abbreviations,
+    stripping platform noise suffixes, and removing company prefixes if prepended.
     """
+    # Strip platform suffixes like " - Indeed", " | Built In NYC", " - Simplify Jobs"
+    for p in PLATFORM_NAMES:
+        title = re.sub(rf"\s*[-|–]\s*{re.escape(p)}\b.*$", "", title, flags=re.IGNORECASE)
     slug = slugify(title)
     # Standardize common acronyms
     slug = re.sub(r"\bsr\b", "senior", slug)
