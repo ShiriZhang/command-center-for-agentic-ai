@@ -28,5 +28,11 @@ class Settings:
     PORT: int = int(os.getenv("PORT", "8000"))
     HOST: str = os.getenv("HOST", "0.0.0.0")
 
+    @property
+    def orchestration(self):
+        """Loads and returns validated orchestration policy from shared config."""
+        from shared.config import load_orchestration_config
+        return load_orchestration_config()
+
 # Global singleton settings instance
 settings = Settings()

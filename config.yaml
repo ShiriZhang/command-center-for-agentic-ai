@@ -71,3 +71,36 @@ network:
 deduplication:
   similarity_threshold: 0.5    # Jaccard title similarity threshold for Tier 2 LLM check
   max_disambiguation_calls: 5  # Cap on disambiguation calls to preserve token budget
+
+# ==============================================================================
+# CSCI-GA.2630 Assignment 2: Agentic Orchestration Policy Configuration
+# Centralized policy for three-service orchestration, shares, deadlines & retries.
+# ==============================================================================
+orchestration:
+  claims:
+    max_per_development: 4
+  budgets:
+    total:
+      max_steps: 30
+      max_fetches: 40
+      max_tokens: 100000
+    researcher:
+      max_steps: 18
+      max_fetches: 20
+      max_tokens: 60000
+    verifier:
+      max_steps: 12
+      max_fetches: 20
+      max_tokens: 40000
+  deadlines:
+    worker_timeout_seconds: 120
+    attempt_timeout_seconds: 210       # Must exceed worker timeout to cover cold start
+    run_timeout_seconds: 900
+    finalization_reserve_seconds: 30   # Reserved before run deadline for local report assembly
+  retries:
+    max_attempts: 3                    # Initial attempt plus up to two retries
+    backoff_initial_seconds: 2.0
+    backoff_factor: 2.0
+    retryable_status_codes:
+      - 503
+

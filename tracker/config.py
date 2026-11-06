@@ -9,6 +9,15 @@ from typing import List, Optional, Tuple
 import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, field_validator
+from shared.contracts import ResourceBudget
+from shared.config import (
+    ClaimsConfig,
+    BudgetsConfig,
+    DeadlinesConfig,
+    RetriesConfig,
+    OrchestrationConfig,
+    load_orchestration_config,
+)
 
 # Locate project root directory
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -64,6 +73,7 @@ class TrackerConfig(BaseModel):
     limits: LimitsConfig
     network: NetworkConfig
     deduplication: DeduplicationConfig
+    orchestration: OrchestrationConfig = Field(default_factory=lambda: OrchestrationConfig())
 
     # Secrets and environment-derived configurations
     openrouter_api_key: Optional[str] = None
