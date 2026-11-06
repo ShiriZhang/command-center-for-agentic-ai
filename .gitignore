@@ -48,4 +48,6 @@ Thumbs.db
 # 5. Local AI Agent Tooling & Workflows
 # -------------------------------------------------------------
 .agents/
-
+openspec/
+reports/
+docs/
