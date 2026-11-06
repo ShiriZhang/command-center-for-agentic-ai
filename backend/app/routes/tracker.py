@@ -1,36 +1,27 @@
 """
 Tracker API Endpoints.
-CSCI-GA.2630 Assignment 1B: Agentic Foundations
-
-Exposes:
-- GET /api/tracker/runs        -> List user's execution runs
-- GET /api/tracker/runs/:id    -> Get specific execution run
-- POST /api/tracker/runs       -> Save run record, top K jobs, and article logs
-- POST /api/tracker/trigger    -> Trigger background research execution
-- GET /api/tracker/history     -> Historical telemetry summary
-- DELETE /api/tracker/runs     -> Reset / clear user's tracker runs
-
-Enforces:
-- Rule 2: Strict JWT Bearer authentication (401 for missing/invalid tokens)
-- Rule 3: Multi-tenant horizontal isolation (users can only access their own data)
+Coordinates authenticated queries, baseline reset, history deletion,
+and triggers backend orchestration lifecycles.
+CSCI-GA.2630 Assignment 2
 """
 
 import json
 import logging
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from ..database import get_db
-from ..models import User, TrackerRun, TrackerArticle, TrackerDevelopment
-from ..auth import get_current_user, create_access_token
+from ..database import SessionLocal, get_db
+from ..models import TrackerArticle, TrackerDevelopment, TrackerRun, User
+from ..auth import get_current_user
+from ..orchestration.admission import ActiveRunConflictError, admit_user_run
 from ..schemas import (
-    TrackerRunCreate,
+    TrackerHistorySummary,
     TrackerRunResponse,
     TrackerTriggerRequest,
     TrackerTriggerResponse,
-    TrackerHistorySummary,
 )
 
 logger = logging.getLogger("tracker.routes")
@@ -38,248 +29,263 @@ logger = logging.getLogger("tracker.routes")
 router = APIRouter(prefix="/api/tracker", tags=["Tracker"])
 
 
-def _trigger_tracker_task(
-    token: str,
-    username: str,
-    reset: bool,
-    steps_override: Optional[int]
-):
-    """
-    Background worker that runs the autonomous research tracker and syncs
-    results back to the backend using the user's authenticated token.
-    """
+def _run_lifecycle_in_background(run_id: int):
+    """Executes backend orchestration in a background worker thread."""
+    db: Session = SessionLocal()
     try:
-        from tracker.run import run_tracker
-        from ..config import settings
-        backend_url = f"http://127.0.0.1:{getattr(settings, 'PORT', 8000)}"
-        run_tracker(
-            reset=reset,
-            steps_override=steps_override,
-            username=username,
-            backend_url=backend_url,
-            skip_login=False,
-            token=token
-        )
+        from ..orchestration.lifecycle import execute_orchestration_lifecycle
+
+        execute_orchestration_lifecycle(db=db, run_id=run_id)
     except Exception as e:
-        logger.error(f"Error executing triggered tracker background task: {e}")
+        logger.error(f"Error in background orchestration run {run_id}: {e}")
+    finally:
+        db.close()
 
 
 @router.get("/runs", response_model=List[TrackerRunResponse])
 def get_tracker_runs(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     GET /api/tracker/runs (Protected endpoint)
-    Retrieves all research executions for the authenticated user.
-
-    🎯 CRITICAL ENFORCEMENT - RULE 3 (Horizontal Authorization):
-    Results are strictly scoped to current_user.id. Users can never view
-    another user's tracker run records.
+    Retrieves all research executions for the authenticated user strictly isolated.
     """
+    user_any: Any = current_user
+    u_id: int = user_any.id
     runs = (
         db.query(TrackerRun)
-        .filter(TrackerRun.user_id == current_user.id)
+        .filter(TrackerRun.user_id == u_id)
         .order_by(TrackerRun.created_at.desc())
         .all()
     )
-    return runs
+    return [TrackerRunResponse.model_validate(r) for r in runs]
 
 
 @router.get("/runs/{run_id}", response_model=TrackerRunResponse)
 def get_tracker_run_by_id(
     run_id: int,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     GET /api/tracker/runs/:id (Protected endpoint)
-    Retrieves a specific run by ID.
-
-    🎯 CRITICAL ENFORCEMENT - RULE 3:
-    If the run exists but belongs to another user, consistently returns HTTP 403 Forbidden.
+    Retrieves a specific run by ID with strict horizontal isolation (403 for other users).
     """
+    user_any: Any = current_user
+    u_id: int = user_any.id
     run = db.query(TrackerRun).filter(TrackerRun.id == run_id).first()
     if not run:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Tracker run with ID {run_id} not found"
+            detail=f"Tracker run with ID {run_id} not found",
         )
-    if run.user_id != current_user.id:
+    run_any: Any = run
+    if int(run_any.user_id) != u_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Forbidden: You cannot access another user's tracker run"
+            detail="Forbidden: You cannot access another user's tracker run",
         )
-    return run
+    return TrackerRunResponse.model_validate(run)
 
 
-@router.post("/runs", response_model=TrackerRunResponse, status_code=status.HTTP_201_CREATED)
-def create_tracker_run(
-    payload: TrackerRunCreate,
-    current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
+@router.post("/runs")
+def create_tracker_run():
     """
-    POST /api/tracker/runs (Protected endpoint)
-    Records a completed tracker execution along with discovered jobs and article audit logs.
-
-    🎯 CRITICAL ENFORCEMENT - RULE 3:
-    If payload specifies a user_id different from current_user.id, returns HTTP 403 Forbidden.
+    POST /api/tracker/runs (Removed - Spec 5.8)
+    Public run ingestion is prohibited to prevent external clients from fabricating runs.
+    Use POST /api/tracker/trigger to orchestrate runs through the backend.
     """
-    if payload.user_id is not None and payload.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Forbidden: You cannot create a tracker run for another user"
-        )
-
-    new_run = TrackerRun(
-        user_id=current_user.id,
-        run_number=payload.run_number,
-        topic=payload.topic,
-        target_k=payload.target_k,
-        status=payload.status,
-        step_count=payload.step_count,
-        fetch_count=payload.fetch_count,
-        tokens_spent=payload.tokens_spent,
-        report_path=payload.report_path,
-        trace_path=payload.trace_path,
+    raise HTTPException(
+        status_code=status.HTTP_405_METHOD_NOT_ALLOWED,
+        detail="Public run ingestion is removed. Use POST /api/tracker/trigger to orchestrate runs.",
     )
-    db.add(new_run)
-    db.flush()
-
-    # Persist job developments (supports payload.developments or payload.jobs)
-    items = payload.developments or payload.jobs or []
-    for idx, item in enumerate(items, 1):
-        supp_json = None
-        if item.supporting_sources:
-            if isinstance(item.supporting_sources, list):
-                supp_json = json.dumps(item.supporting_sources)
-            elif isinstance(item.supporting_sources, str):
-                supp_json = item.supporting_sources
-
-        dev = TrackerDevelopment(
-            run_id=new_run.id,
-            fingerprint=item.fingerprint,
-            rank=item.rank if item.rank is not None else idx,
-            title=item.title,
-            company=item.company,
-            primary_url=item.primary_url or "",
-            supporting_sources=supp_json,
-            location=item.location,
-            compensation=item.compensation,
-            qualifications_summary=item.qualifications_summary,
-            recrawl_status=item.recrawl_status,
-        )
-        db.add(dev)
-
-    # Persist article audit logs
-    articles = payload.articles or []
-    for art in articles:
-        art_record = TrackerArticle(
-            run_id=new_run.id,
-            url=art.url,
-            title=art.title,
-            status=art.status,
-            byte_size=art.byte_size,
-            fetch_time_ms=art.fetch_time_ms,
-            error_message=art.error_message,
-        )
-        db.add(art_record)
-
-    db.commit()
-    db.refresh(new_run)
-    return new_run
 
 
-@router.post("/trigger", response_model=TrackerTriggerResponse)
+@router.post("/trigger", response_model=TrackerTriggerResponse, status_code=status.HTTP_202_ACCEPTED)
 def trigger_tracker_run(
     background_tasks: BackgroundTasks,
     payload: Optional[TrackerTriggerRequest] = None,
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     POST /api/tracker/trigger (Protected endpoint)
-    Triggers an asynchronous tracker execution for the current user.
+    Admits a new run and triggers backend orchestration lifecycle in the background.
+    Rejects with HTTP 409 Conflict if another run is actively running.
     """
-    last_run = (
-        db.query(TrackerRun)
-        .filter(TrackerRun.user_id == current_user.id)
-        .order_by(TrackerRun.run_number.desc())
-        .first()
-    )
+    user_any: Any = current_user
+    u_id: int = user_any.id
     is_reset = payload.reset if payload else False
-    steps_override = payload.steps_override if payload else None
+    topic = "Top 10 newest entry-level and new grad AI/ML engineering roles"
+    target_k = 10
 
-    next_run = 1 if not last_run or is_reset else last_run.run_number + 1
-
-    # Issue a short-lived token for the background worker to sync back
-    worker_token = create_access_token({"sub": str(current_user.id)})
-
-    background_tasks.add_task(
-        _trigger_tracker_task,
-        token=worker_token,
-        username=current_user.username,
-        reset=is_reset,
-        steps_override=steps_override
+    max_gen = (
+        db.query(func.coalesce(func.max(TrackerRun.reset_generation), 0))
+        .filter(TrackerRun.user_id == u_id)
+        .scalar()
+        or 0
     )
+    reset_generation = int(max_gen) + (1 if is_reset else 0)
+
+    try:
+        admitted = admit_user_run(
+            db=db,
+            user_id=u_id,
+            topic=topic,
+            target_k=target_k,
+            reset_generation=reset_generation,
+        )
+    except ActiveRunConflictError as e:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Conflict: Active run {e.active_run_uuid} already running",
+        )
+
+    admitted_any: Any = admitted
+    from ..orchestration.telemetry import default_orchestrator_logger
+
+    default_orchestrator_logger.log_event(
+        service="orchestrator",
+        run_id=str(admitted_any.run_uuid),
+        request_id=str(admitted_any.run_uuid),
+        step=0,
+        direction="inbound",
+        endpoint_or_tool="/api/tracker/trigger",
+        status="admitted",
+        latency_ms=0.0,
+    )
+
+    background_tasks.add_task(_run_lifecycle_in_background, int(admitted_any.id))
 
     return TrackerTriggerResponse(
         status="triggered",
-        message=f"Tracker run {next_run} queued successfully in background",
-        run_number=next_run
+        message=f"Tracker run {admitted_any.run_number} queued successfully in background",
+        run_number=int(admitted_any.run_number),
+        run_id=int(admitted_any.id),
+        run_uuid=str(admitted_any.run_uuid),
     )
+
+
+@router.post("/reset")
+def reset_tracker_baseline(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    POST /api/tracker/reset (Protected endpoint - Spec 5.9)
+    Starts a new scoped baseline comparison lineage by incrementing reset_generation.
+    Rejects with HTTP 409 Conflict if an active run exists.
+    Preserves historical runs intact.
+    """
+    user_any: Any = current_user
+    u_id: int = user_any.id
+    active_run = (
+        db.query(TrackerRun)
+        .filter(TrackerRun.user_id == u_id, TrackerRun.status == "running")
+        .first()
+    )
+    if active_run:
+        run_any: Any = active_run
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Conflict: Cannot reset baseline while active run {run_any.run_uuid} is running",
+        )
+
+    # Invalidate baseline eligibility for all prior runs of this user
+    db.query(TrackerRun).filter(
+        TrackerRun.user_id == u_id,
+        TrackerRun.is_baseline_eligible == True,  # noqa: E712
+    ).update({TrackerRun.is_baseline_eligible: False})
+    db.commit()
+
+    max_gen = (
+        db.query(func.coalesce(func.max(TrackerRun.reset_generation), 0))
+        .filter(TrackerRun.user_id == u_id)
+        .scalar()
+        or 0
+    )
+    next_gen = int(max_gen) + 1
+    return {
+        "status": "ok",
+        "reset_generation": next_gen,
+        "message": f"Baseline reset successfully for user '{user_any.username}'. History preserved.",
+    }
 
 
 @router.get("/history", response_model=TrackerHistorySummary)
 def get_tracker_history(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     GET /api/tracker/history (Protected endpoint)
     Aggregates execution metrics, totals, and run history for the authenticated user.
     """
+    user_any: Any = current_user
+    u_id: int = user_any.id
     runs = (
         db.query(TrackerRun)
-        .filter(TrackerRun.user_id == current_user.id)
+        .filter(TrackerRun.user_id == u_id)
         .order_by(TrackerRun.created_at.desc())
         .all()
     )
     total_runs = len(runs)
-    last_run = runs[0] if runs else None
-    total_steps = sum(r.step_count for r in runs)
-    total_fetches = sum(r.fetch_count for r in runs)
-    total_tokens = sum(r.tokens_spent for r in runs)
+    last_run_any: Any = runs[0] if runs else None
+    total_steps = sum(int(getattr(r, "step_count", 0) or 0) for r in runs)
+    total_fetches = sum(int(getattr(r, "fetch_count", 0) or 0) for r in runs)
+    total_tokens = sum(int(getattr(r, "tokens_spent", 0) or 0) for r in runs)
+    runs_payload = [TrackerRunResponse.model_validate(r) for r in runs]
 
     return TrackerHistorySummary(
         total_runs=total_runs,
-        last_run_number=last_run.run_number if last_run else 0,
-        last_run_status=last_run.status if last_run else None,
-        last_run_at=last_run.created_at if last_run else None,
+        last_run_number=int(last_run_any.run_number) if last_run_any else 0,
+        last_run_status=str(last_run_any.status) if last_run_any and last_run_any.status else None,
+        last_run_at=last_run_any.created_at if last_run_any else None,
         total_steps=total_steps,
         total_fetches=total_fetches,
         total_tokens=total_tokens,
-        runs=runs
+        runs=runs_payload,
     )
 
 
 @router.delete("/runs")
 def clear_tracker_runs(
     current_user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
-    DELETE /api/tracker/runs (Protected endpoint)
-    Purges all tracker runs and cascades deletions of associated articles and developments
-    strictly for the authenticated user (satisfies --reset policy).
+    DELETE /api/tracker/runs (Protected endpoint - Spec 5.9)
+    Purges all tracker runs strictly for the authenticated user.
+    Rejects with HTTP 409 Conflict if an active run exists.
+    Clears baseline pointers and cascades dependent records.
     """
-    runs = db.query(TrackerRun).filter(TrackerRun.user_id == current_user.id).all()
+    user_any: Any = current_user
+    u_id: int = user_any.id
+    active_run = (
+        db.query(TrackerRun)
+        .filter(TrackerRun.user_id == u_id, TrackerRun.status == "running")
+        .first()
+    )
+    if active_run:
+        run_any: Any = active_run
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Conflict: Cannot delete history while active run {run_any.run_uuid} is running",
+        )
+
+    # Clear baseline pointers first to satisfy foreign key constraints
+    db.query(TrackerRun).filter(TrackerRun.user_id == u_id).update(
+        {TrackerRun.stale_source_run_id: None, TrackerRun.stale_source_run_uuid: None}
+    )
+    db.flush()
+
+    runs = db.query(TrackerRun).filter(TrackerRun.user_id == u_id).all()
     count = len(runs)
     for r in runs:
         db.delete(r)
     db.commit()
     return {
         "status": "ok",
-        "message": f"Successfully deleted {count} tracker runs for user '{current_user.username}'"
+        "message": f"Successfully deleted {count} tracker runs for user '{user_any.username}'",
     }

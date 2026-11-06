@@ -93,6 +93,19 @@ class TrackerArticleItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class TrackerClaimItem(BaseModel):
+    """Atomic cited claim within a development."""
+    id: Optional[int] = None
+    claim_id: str
+    text: str
+    source_url: str
+    verdict: str = "unverified"
+    evidence: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class TrackerDevelopmentItem(BaseModel):
     """
     Canonical job development item synthesized in the Top K report.
@@ -117,6 +130,7 @@ class TrackerDevelopmentItem(BaseModel):
     recrawl_status: str = "New since last run"  # "New since last run", "Still in top K", "Dropped"
     fingerprint: Optional[str] = None
     created_at: Optional[datetime] = None
+    claims: List[TrackerClaimItem] = []
 
     model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
@@ -167,13 +181,29 @@ class TrackerRunResponse(BaseModel):
     """
     id: int
     user_id: int
+    run_uuid: Optional[str] = None
     run_number: int
     topic: str
     target_k: int
     status: str
+    researcher_status: Optional[str] = None
+    verifier_status: Optional[str] = None
+    is_baseline_eligible: bool = False
+    reset_generation: int = 0
+    stale_source_run_id: Optional[int] = None
+    stale_source_run_uuid: Optional[str] = None
     step_count: int
     fetch_count: int
     tokens_spent: int
+    reserved_steps: int = 0
+    reserved_fetches: int = 0
+    reserved_tokens: int = 0
+    measured_steps: int = 0
+    measured_fetches: int = 0
+    measured_tokens: int = 0
+    charged_steps: int = 0
+    charged_fetches: int = 0
+    charged_tokens: int = 0
     report_path: Optional[str] = None
     trace_path: Optional[str] = None
     created_at: datetime
@@ -199,6 +229,7 @@ class TrackerTriggerResponse(BaseModel):
     message: str
     run_number: Optional[int] = None
     run_id: Optional[int] = None
+    run_uuid: Optional[str] = None
 
 
 class TrackerHistorySummary(BaseModel):

@@ -78,6 +78,15 @@ async def lifespan(app: FastAPI):
                 print(">>> [SEED] Mandatory grading account 'NYUgrader' verified/created.")
             else:
                 print(">>> [SEED] Mandatory grading account 'NYUgrader' already exists.")
+
+            # Step 3: Startup Interruption Recovery (Spec 5.7)
+            try:
+                from .orchestration.recovery import recover_interrupted_runs
+                recovered = recover_interrupted_runs(db)
+                if recovered > 0:
+                    print(f">>> [RECOVERY] Recovered {recovered} interrupted runs to partial status.")
+            except Exception as rec_err:
+                print(f">>> [RECOVERY] Interruption recovery skipped or failed: {rec_err}")
         finally:
             db.close()
     except Exception as e:
