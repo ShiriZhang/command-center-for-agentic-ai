@@ -39,10 +39,10 @@ class TestBackendModels(unittest.TestCase):
         """
         table = Base.metadata.tables["tracker_runs"]
         fks = list(table.foreign_keys)
-        self.assertEqual(len(fks), 1)
-        fk = fks[0]
-        self.assertEqual(fk.target_fullname, "users.id")
-        self.assertEqual(fk.ondelete, "CASCADE")
+        user_fk = next((fk for fk in fks if fk.target_fullname == "users.id"), None)
+        self.assertIsNotNone(user_fk)
+        self.assertEqual(user_fk.target_fullname, "users.id")
+        self.assertEqual(user_fk.ondelete, "CASCADE")
 
     def test_tracker_article_foreign_key(self):
         """

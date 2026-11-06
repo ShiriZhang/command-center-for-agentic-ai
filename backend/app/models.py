@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text
+import uuid
+from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Boolean, UniqueConstraint
 from sqlalchemy.orm import relationship
 from .database import Base
 
@@ -57,13 +58,52 @@ class TrackerRun(Base):
         nullable=False,
         index=True
     )
+    run_uuid = Column(
+        String(36),
+        unique=True,
+        index=True,
+        nullable=False,
+        default=lambda: str(uuid.uuid4())
+    )
     run_number = Column(Integer, nullable=False, default=1)
+    protocol_version = Column(Integer, nullable=False, default=2, index=True)
+    reset_generation = Column(Integer, nullable=False, default=0, index=True)
+    is_baseline_eligible = Column(Boolean, nullable=False, default=False)
+
     topic = Column(String(255), nullable=False)
     target_k = Column(Integer, nullable=False, default=10)
-    status = Column(String(50), nullable=False, default="complete")  # "complete", "partial", "error"
+    status = Column(String(50), nullable=False, default="complete")
+
+    researcher_status = Column(String(50), nullable=True)
+    verifier_status = Column(String(50), nullable=True)
+    researcher_error = Column(Text, nullable=True)
+    verifier_error = Column(Text, nullable=True)
+    researcher_request_id = Column(String(36), nullable=True)
+    verifier_request_id = Column(String(36), nullable=True)
+
+    reserved_steps = Column(Integer, nullable=False, default=0)
+    reserved_fetches = Column(Integer, nullable=False, default=0)
+    reserved_tokens = Column(Integer, nullable=False, default=0)
+
+    measured_steps = Column(Integer, nullable=False, default=0)
+    measured_fetches = Column(Integer, nullable=False, default=0)
+    measured_tokens = Column(Integer, nullable=False, default=0)
+
+    charged_steps = Column(Integer, nullable=False, default=0)
+    charged_fetches = Column(Integer, nullable=False, default=0)
+    charged_tokens = Column(Integer, nullable=False, default=0)
+
     step_count = Column(Integer, nullable=False, default=0)
     fetch_count = Column(Integer, nullable=False, default=0)
     tokens_spent = Column(Integer, nullable=False, default=0)
+
+    stale_source_run_id = Column(
+        Integer,
+        ForeignKey("tracker_runs.id", ondelete="SET NULL"),
+        nullable=True
+    )
+    stale_source_run_uuid = Column(String(36), nullable=True)
+
     report_path = Column(String(512), nullable=True)
     trace_path = Column(String(512), nullable=True)
     created_at = Column(
@@ -86,6 +126,12 @@ class TrackerRun(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
         order_by="TrackerDevelopment.rank"
+    )
+    claims = relationship(
+        "TrackerClaim",
+        back_populates="run",
+        cascade="all, delete-orphan",
+        passive_deletes=True
     )
 
 
@@ -153,5 +199,50 @@ class TrackerDevelopment(Base):
         nullable=False
     )
 
-    # Relationship
+    # Relationships
     run = relationship("TrackerRun", back_populates="developments")
+    claims = relationship(
+        "TrackerClaim",
+        back_populates="development",
+        cascade="all, delete-orphan",
+        passive_deletes=True
+    )
+
+
+class TrackerClaim(Base):
+    """
+    Atomic cited claim discovered by Researcher and verified by Verifier.
+    Cascades on development or run deletion.
+    """
+    __tablename__ = "tracker_claims"
+    __table_args__ = (
+        UniqueConstraint("run_id", "claim_id", name="uq_tracker_claims_run_claim"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    run_id = Column(
+        Integer,
+        ForeignKey("tracker_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    development_id = Column(
+        Integer,
+        ForeignKey("tracker_developments.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    claim_id = Column(String(255), nullable=False, index=True)
+    text = Column(Text, nullable=False)
+    source_url = Column(String(1024), nullable=False)
+    verdict = Column(String(50), nullable=False, default="unverified")  # "supported", "unsupported", "unreachable", "unverified"
+    evidence = Column(Text, nullable=True)
+    created_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+
+    # Relationships
+    development = relationship("TrackerDevelopment", back_populates="claims")
+    run = relationship("TrackerRun", back_populates="claims")
