@@ -44,7 +44,7 @@ Your root `.env` configuration:
 
 ```ini
 # 1. Database Connection (Backend Orchestrator Only)
-DATABASE_URL=postgresql://neondb_owner:npg_fpFyclhiC0D9@ep-broad-bird-b4p2idis-pooler.c-6.us-east-2.aws.neon.tech/neondb?sslmode=require&channel_binding=require
+DATABASE_URL=postgresql://user:password@your-project.aws.neon.tech/neondb?sslmode=require
 
 # 2. JWT Security (Backend Authentication)
 JWT_SECRET=fnms-course-super-secret-key-change-in-production-2026
