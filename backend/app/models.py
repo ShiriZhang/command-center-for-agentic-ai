@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from typing import Optional
 import uuid
 from sqlalchemy import Column, Integer, String, DateTime, ForeignKey, Text, Boolean, UniqueConstraint
 from sqlalchemy.orm import relationship
@@ -111,6 +112,20 @@ class TrackerRun(Base):
         default=lambda: datetime.now(timezone.utc),
         nullable=False
     )
+
+    # Self-referential relationship for stale baseline origin
+    stale_source_run = relationship(
+        "TrackerRun",
+        remote_side=[id],
+        foreign_keys=[stale_source_run_id],
+        uselist=False,
+    )
+
+    @property
+    def stale_source_created_at(self) -> Optional[datetime]:
+        if self.stale_source_run:
+            return self.stale_source_run.created_at
+        return None
 
     # Relationships
     user = relationship("User", back_populates="tracker_runs")

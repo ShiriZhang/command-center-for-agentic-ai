@@ -131,3 +131,34 @@ def load_orchestration_config(config_yaml_path: Optional[Path] = None) -> Orches
 
     orch_data = raw_yaml.get("orchestration", {})
     return OrchestrationConfig(**orch_data)
+
+
+def split_step_budget(steps: int, cfg: Optional[OrchestrationConfig] = None) -> BudgetsConfig:
+    """
+    Computes an explicit valid split for an overridden step allowance.
+    Requires at least 2 steps (minimum 1 step for researcher and 1 for verifier).
+    """
+    base = cfg or load_orchestration_config()
+    total_steps = min(max(2, steps), base.budgets.total.max_steps)
+    res_steps = max(1, int(round(total_steps * 0.6)))
+    ver_steps = max(1, total_steps - res_steps)
+    # Ensure splits sum up to at most total_steps
+    if res_steps + ver_steps > total_steps:
+        res_steps = total_steps - ver_steps
+    return BudgetsConfig(
+        total=ResourceBudget(
+            max_steps=total_steps,
+            max_fetches=base.budgets.total.max_fetches,
+            max_tokens=base.budgets.total.max_tokens,
+        ),
+        researcher=ResourceBudget(
+            max_steps=res_steps,
+            max_fetches=base.budgets.researcher.max_fetches,
+            max_tokens=base.budgets.researcher.max_tokens,
+        ),
+        verifier=ResourceBudget(
+            max_steps=ver_steps,
+            max_fetches=base.budgets.verifier.max_fetches,
+            max_tokens=base.budgets.verifier.max_tokens,
+        ),
+    )

@@ -29,13 +29,21 @@ logger = logging.getLogger("tracker.routes")
 router = APIRouter(prefix="/api/tracker", tags=["Tracker"])
 
 
-def _run_lifecycle_in_background(run_id: int):
+def _run_lifecycle_in_background(run_id: int, steps_override: Optional[int] = None):
     """Executes backend orchestration in a background worker thread."""
     db: Session = SessionLocal()
     try:
         from ..orchestration.lifecycle import execute_orchestration_lifecycle
+        from ..orchestration.dispatch import WorkerDispatcher
+        from ..orchestration.telemetry import default_orchestrator_logger
+        from shared.config import split_step_budget
 
-        execute_orchestration_lifecycle(db=db, run_id=run_id)
+        dispatcher = None
+        if steps_override is not None:
+            budgets = split_step_budget(steps_override)
+            dispatcher = WorkerDispatcher(budgets=budgets, telemetry_logger=default_orchestrator_logger)
+
+        execute_orchestration_lifecycle(db=db, run_id=run_id, dispatcher=dispatcher)
     except Exception as e:
         logger.error(f"Error in background orchestration run {run_id}: {e}")
     finally:
@@ -117,6 +125,16 @@ def trigger_tracker_run(
     user_any: Any = current_user
     u_id: int = user_any.id
     is_reset = payload.reset if payload else False
+    steps_override = payload.steps_override if payload else None
+    if steps_override is not None:
+        from shared.config import load_orchestration_config
+        orch_cfg = load_orchestration_config()
+        if steps_override < 2 or steps_override > orch_cfg.budgets.total.max_steps:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"steps_override ({steps_override}) must be at least 2 and cannot exceed total configured allowance ({orch_cfg.budgets.total.max_steps}).",
+            )
+
     topic = "Top 10 newest entry-level and new grad AI/ML engineering roles"
     target_k = 10
 
@@ -156,7 +174,11 @@ def trigger_tracker_run(
         latency_ms=0.0,
     )
 
-    background_tasks.add_task(_run_lifecycle_in_background, int(admitted_any.id))
+    background_tasks.add_task(
+        _run_lifecycle_in_background,
+        int(admitted_any.id),
+        steps_override=steps_override,
+    )
 
     return TrackerTriggerResponse(
         status="triggered",

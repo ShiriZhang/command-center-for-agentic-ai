@@ -1,49 +1,33 @@
 """
 CLI Runner for Agentic Tracker.
+Acts as an authenticated backend trigger and poll client.
 Supports:
   python -m tracker.run
   python -m tracker.run --reset
-  python -m tracker.run --steps 5
+  python -m tracker.run --steps 10
   python -m tracker.run --username NYUgrader --password Courant2026!
 
-CSCI-GA.2630 Assignment 1B: Agentic Foundations
+CSCI-GA.2630 Assignment 2
 """
 
 import argparse
 import logging
 import os
 from pathlib import Path
-import re
 import sys
 import time
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
-from urllib.parse import urlparse
+from typing import Any, Dict, List, Optional, Union
 
 import httpx
 
-from tracker.agent import ResearchAgent
+from shared.config import load_orchestration_config
 from tracker.config import config
-from tracker.memory import RecrawlMemoryManager, JobDeduplicator
-from tracker.memory.dedup import (
-    PLATFORM_NAMES,
-    PLATFORM_DOMAINS,
-    SEO_COMPANY_BLACKLIST,
-    is_platform_name,
-    is_platform_url
-)
-from tracker.memory.semantic import SemanticMemory
-from tracker.tools.fetch import extract_compensation_from_text, extract_location_from_text
-from tracker.reporter import (
-    generate_run1_report,
-    generate_run2_report,
-    save_report_and_trace
-)
 
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-    datefmt="%H:%M:%S"
+    datefmt="%H:%M:%S",
 )
 logger = logging.getLogger("tracker.run")
 
@@ -51,55 +35,162 @@ logger = logging.getLogger("tracker.run")
 def authenticate_user(
     username: str,
     password: str,
-    backend_url: str
+    backend_url: str,
 ) -> Optional[str]:
     """
-    Attempts to authenticate with the A1 platform backend via POST /api/auth/login.
+    Attempts to authenticate with the backend via POST /api/auth/login.
     Returns JWT Bearer access token if successful, None otherwise.
     """
     login_url = f"{backend_url.rstrip('/')}/api/auth/login"
     try:
-        with httpx.Client(timeout=5.0) as client:
+        with httpx.Client(timeout=10.0) as client:
             resp = client.post(
                 login_url,
-                json={"username": username, "password": password}
+                json={"username": username, "password": password},
             )
             if resp.status_code == 200:
                 data = resp.json()
                 token = data.get("access_token")
                 logger.info(f"Authenticated successfully with backend as user '{username}'.")
                 return token
-            else:
-                logger.warning(
-                    f"Backend authentication failed (HTTP {resp.status_code}): {resp.text}"
-                )
-                return None
+            logger.warning(
+                f"Backend authentication failed (HTTP {resp.status_code}): {resp.text}"
+            )
+            return None
     except Exception as e:
-        logger.info(f"Backend not available at {backend_url} ({e}); continuing with standalone local state.")
+        logger.error(f"Backend not available at {backend_url} ({e}).")
         return None
 
 
-def sync_run_to_backend(
+def trigger_tracker_run(
     token: str,
     backend_url: str,
-    run_payload: Dict[str, Any]
-) -> bool:
+    reset: bool = False,
+    steps_override: Optional[int] = None,
+) -> Dict[str, Any]:
     """
-    Posts the executed run record to backend POST /api/tracker/runs.
+    Triggers an orchestration run on the backend via POST /api/tracker/trigger.
+    Returns the accepted response payload containing run_id and run_uuid.
     """
-    endpoint = f"{backend_url.rstrip('/')}/api/tracker/runs"
+    trigger_url = f"{backend_url.rstrip('/')}/api/tracker/trigger"
     headers = {"Authorization": f"Bearer {token}"}
-    try:
-        with httpx.Client(timeout=10.0) as client:
-            resp = client.post(endpoint, json=run_payload, headers=headers)
-            if resp.status_code in (200, 201):
-                logger.info("Successfully synced tracker run to backend database.")
-                return True
-            logger.warning(f"Failed to sync run to backend (HTTP {resp.status_code}): {resp.text}")
-            return False
-    except Exception as e:
-        logger.warning(f"Could not reach backend to sync run: {e}")
-        return False
+    payload: Dict[str, Any] = {"reset": reset}
+    if steps_override is not None:
+        payload["steps_override"] = steps_override
+
+    with httpx.Client(timeout=15.0) as client:
+        resp = client.post(trigger_url, json=payload, headers=headers)
+        if resp.status_code == 202:
+            return resp.json()
+        elif resp.status_code == 409:
+            raise RuntimeError(
+                f"Conflict: An active tracker run is already in progress on the backend. ({resp.text})"
+            )
+        else:
+            raise RuntimeError(
+                f"Backend trigger failed (HTTP {resp.status_code}): {resp.text}"
+            )
+
+
+def poll_tracker_run(
+    token: str,
+    backend_url: str,
+    run_id: int,
+    poll_interval: float = 2.0,
+    max_wait_seconds: float = 900.0,
+) -> Dict[str, Any]:
+    """
+    Polls GET /api/tracker/runs/:id until terminal status ('complete' or 'partial').
+    """
+    poll_url = f"{backend_url.rstrip('/')}/api/tracker/runs/{run_id}"
+    headers = {"Authorization": f"Bearer {token}"}
+    start_time = time.monotonic()
+
+    with httpx.Client(timeout=15.0) as client:
+        while True:
+            elapsed = time.monotonic() - start_time
+            if elapsed > max_wait_seconds:
+                raise TimeoutError(
+                    f"Tracker run {run_id} did not finish within {max_wait_seconds}s deadline."
+                )
+
+            resp = client.get(poll_url, headers=headers)
+            if resp.status_code == 200:
+                run_data = resp.json()
+                current_status = run_data.get("status")
+                if current_status in ("complete", "partial"):
+                    return run_data
+                logger.info(
+                    f"Run {run_id} in progress (status: {current_status}). Waiting {poll_interval}s..."
+                )
+            elif resp.status_code == 404:
+                raise RuntimeError(f"Tracker run {run_id} not found on backend.")
+            else:
+                logger.warning(
+                    f"Warning: Poll received HTTP {resp.status_code}: {resp.text}. Retrying..."
+                )
+
+            time.sleep(poll_interval)
+
+
+def format_and_display_run(run: Dict[str, Any]) -> None:
+    """
+    Formats and outputs terminal report summary for the run.
+    """
+    run_num = run.get("run_number", 1)
+    status_str = str(run.get("status", "unknown")).upper()
+    run_uuid = run.get("run_uuid", "unknown")
+    res_status = run.get("researcher_status", "unknown")
+    ver_status = run.get("verifier_status", "unknown")
+    steps = run.get("step_count", run.get("charged_steps", 0))
+    fetches = run.get("fetch_count", run.get("charged_fetches", 0))
+    tokens = run.get("tokens_spent", run.get("charged_tokens", 0))
+    developments = run.get("developments", [])
+    rep_path = run.get("report_path")
+    trace_path = run.get("trace_path")
+
+    # Claim breakdown
+    supported_cnt = 0
+    unsupported_cnt = 0
+    unreachable_cnt = 0
+    unverified_cnt = 0
+    for dev in developments:
+        for claim in dev.get("claims", []):
+            v = claim.get("verdict", "").lower()
+            if v == "supported":
+                supported_cnt += 1
+            elif v == "unsupported":
+                unsupported_cnt += 1
+            elif v == "unreachable":
+                unreachable_cnt += 1
+            elif v == "unverified":
+                unverified_cnt += 1
+
+    print("\n" + "=" * 65)
+    print(f"  TRACKER [RUN {run_num}] EXECUTION FINISHED")
+    print("=" * 65)
+    print(f"Status:            {status_str}")
+    print(f"Run UUID:          {run_uuid}")
+    print(f"Researcher Status: {res_status}")
+    print(f"Verifier Status:   {ver_status}")
+    if run.get("researcher_error"):
+        print(f"Researcher Error:  {run.get('researcher_error')}")
+    if run.get("verifier_error"):
+        print(f"Verifier Error:    {run.get('verifier_error')}")
+    if run.get("stale_source_run_uuid"):
+        stale_ts = run.get("stale_source_created_at") or "prior baseline"
+        print(f"[STALE ORIGIN]:    Sourced from baseline run {run.get('stale_source_run_uuid')} (created at {stale_ts})")
+    print(f"Steps Taken:       {steps}")
+    print(f"Fetches:           {fetches}")
+    print(f"Tokens Spent:      {tokens:,}")
+    print(f"Top K Roles:       {len(developments)}")
+    print(f"Claims Breakdown:  {supported_cnt} supported, {unsupported_cnt} unsupported, "
+          f"{unreachable_cnt} unreachable, {unverified_cnt} unverified")
+    if rep_path:
+        print(f"Report File:       {rep_path}")
+    if trace_path:
+        print(f"Trace File:        {trace_path}")
+    print("=" * 65 + "\n")
 
 
 def run_tracker(
@@ -110,432 +201,152 @@ def run_tracker(
     backend_url: Optional[str] = None,
     skip_login: bool = False,
     token: Optional[str] = None,
-    reports_dir: Optional[Path] = None,
-    state_file: Optional[Union[str, Path]] = None
+    poll_interval: float = 2.0,
 ) -> Dict[str, Any]:
     """
-    Orchestrates the tracker lifecycle:
-    1. Authentication with backend (if available).
-    2. Automatic Run 1 vs Run 2 detection.
-    3. Handwritten Agent Loop execution.
-    4. Two-Tier Deduplication and Classification.
-    5. Report and Trace generation.
+    Authenticated trigger/poll client lifecycle:
+    1. Validates budget limits (--steps cannot increase server budget).
+    2. Authenticates with backend (or uses provided token). Outage fails immediately without local model calls.
+    3. Triggers Orchestrator via POST /api/tracker/trigger.
+    4. Polls GET /api/tracker/runs/:id to completion.
+    5. Displays summary and returns run metadata.
     """
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    reconf = getattr(sys.stdout, "reconfigure", None)
+    if callable(reconf):
+        reconf(encoding="utf-8", errors="replace")
 
-    user = username or config.tracker_username or os.getenv("TRACKER_USER", "NYUgrader")
-    pwd = password or config.tracker_password or os.getenv("TRACKER_PASSWORD", "Courant2026!")
-    b_url = backend_url or config.backend_url or "http://localhost:8000"
+    # 1. Budget validation
+    if steps_override is not None:
+        if steps_override < 2:
+            raise ValueError(f"--steps override must be at least 2 (minimum 1 step for researcher and 1 for verifier), got {steps_override}")
+        orch_cfg = load_orchestration_config()
+        max_allowed_steps = orch_cfg.budgets.total.max_steps
+        if steps_override > max_allowed_steps:
+            raise ValueError(
+                f"--steps override ({steps_override}) cannot exceed total configured allowance ({max_allowed_steps})."
+            )
 
-    jwt_token = token
-    if not jwt_token and not skip_login and user and pwd:
+    b_url = (backend_url or config.backend_url or "http://localhost:8000").rstrip("/")
+
+    # 2. Authenticate
+    jwt_token = token or os.getenv("TRACKER_TOKEN") or os.getenv("NYUGRADER_TOKEN")
+    if not jwt_token:
+        user = username or config.tracker_username or os.getenv("TRACKER_USER", "NYUgrader")
+        pwd = password or config.tracker_password or os.getenv("TRACKER_PASSWORD", "Courant2026!")
+        if not user or not pwd:
+            raise RuntimeError(
+                "Backend authentication requires username and password. "
+                "Standalone local model execution has been removed."
+            )
         jwt_token = authenticate_user(user, pwd, b_url)
+        if not jwt_token:
+            raise RuntimeError(
+                f"Backend authentication failed or backend unreachable at {b_url}. "
+                "Standalone local model execution has been removed."
+            )
 
-    memory_manager = RecrawlMemoryManager(state_file_path=state_file)
+    # 3. Trigger run
+    logger.info(f"Triggering tracker run on backend at {b_url} (reset={reset})...")
+    trigger_resp = trigger_tracker_run(
+        token=jwt_token,
+        backend_url=b_url,
+        reset=reset,
+        steps_override=steps_override,
+    )
+    run_id = int(trigger_resp["run_id"])
+    run_uuid = str(trigger_resp.get("run_uuid", ""))
+    run_number = int(trigger_resp.get("run_number", 1))
+    logger.info(f"Tracker run accepted: run_id={run_id}, run_uuid={run_uuid}, run_number={run_number}")
 
-    if reset:
-        logger.info("Reset flag provided. Wiping prior recrawl memory state.")
-        memory_manager.reset_state()
-
-    # Detect Run Number
-    prior_state = memory_manager.load_previous_state()
-    if prior_state is None:
-        run_number = 1
-        known_urls = set()
-        prior_top_k = []
-        logger.info("No prior state found. Executing as [RUN 1] (Initial Crawl).")
-    else:
-        run_number = prior_state.get("run_number", 1) + 1
-        known_urls = memory_manager.get_known_urls()
-        prior_top_k = memory_manager.get_previous_top_k()
-        logger.info(
-            f"Prior run state detected (Run {prior_state.get('run_number', 1)}). "
-            f"Executing as [RUN {run_number}] (Differential Recrawl) with {len(known_urls)} cached URLs."
-        )
-
-    # Execute Autonomous Agent
-    agent = ResearchAgent(config=config, episodic_memory=memory_manager)
-    result = agent.run(
-        max_steps=steps_override or config.limits.max_steps,
-        previous_urls=known_urls
+    # 4. Poll run
+    logger.info(f"Polling run {run_id} to completion...")
+    run_data = poll_tracker_run(
+        token=jwt_token,
+        backend_url=b_url,
+        run_id=run_id,
+        poll_interval=poll_interval,
     )
 
-    ROLE_KEYWORDS = [
-        "data scientist", "ai engineer", "ml engineer", "machine learning engineer",
-        "software engineer", "new grad", "early career", "entry level", "deep learning",
-        "applied scientist", "computer vision", "nlp", "llm", "engineer", "engineering",
-        "scientist", "developer", "intern", "internship", "researcher", "analyst",
-        "fellow", "specialist", "architect", "programmer", "modeler"
-    ]
-
-    def _has_role_keyword(text: str) -> bool:
-        t = text.lower()
-        return any(kw in t for kw in ROLE_KEYWORDS)
-
-    def _is_invalid_company(comp_name: str) -> bool:
-        if not comp_name:
-            return True
-        c = comp_name.strip()
-        if c.lower() in ("company", "tech company", "untitled", "unknown", "n/a"):
-            return True
-        if is_platform_name(c):
-            return True
-        if SEO_COMPANY_BLACKLIST.search(c):
-            return True
-        return False
-
-    def _extract_company_and_title(raw_title: str, raw_comp: Optional[str], u: str) -> Tuple[str, str]:
-        comp = (raw_comp or "").strip()
-        tit = (raw_title or "AI/ML Role").strip()
-
-        # Invalidate platform or SEO titles passed as company
-        if _is_invalid_company(comp):
-            comp = ""
-
-        # Pre-extract authoritative ATS company if available from URL
-        ats_company = ""
-        if u:
-            try:
-                parsed = urlparse(u)
-                netloc = parsed.netloc.lower()
-                path_parts = [p for p in parsed.path.strip("/").split("/") if p]
-                if any(k in netloc for k in ["greenhouse.io", "lever.co", "ashbyhq.com"]) and path_parts:
-                    ats_company = path_parts[0].replace("-", " ").title()
-                elif "myworkdayjobs.com" in netloc and path_parts:
-                    ats_company = netloc.split(".")[0].replace("-", " ").title()
-            except Exception:
-                pass
-
-        if ats_company and not comp:
-            comp = ats_company
-
-        # Delimiters in title: " - ", " | ", " – ", " : ", " · "
-        for sep in [" - ", " | ", " – ", " : ", " · "]:
-            if sep in tit:
-                parts = [p.strip() for p in tit.split(sep) if p.strip()]
-                valid_parts = [
-                    p for p in parts
-                    if not is_platform_name(p) and not SEO_COMPANY_BLACKLIST.search(p)
-                ]
-                if len(valid_parts) == 3:
-                    p0, p1, p2 = valid_parts[0], valid_parts[1], valid_parts[2]
-                    if _has_role_keyword(p0) and not _has_role_keyword(p2):
-                        tit = f"{p0} - {p1}"
-                        if not comp or _is_invalid_company(comp):
-                            comp = p2
-                    elif not _has_role_keyword(p0) and _has_role_keyword(p1):
-                        tit = f"{p1} - {p2}"
-                        if not comp or _is_invalid_company(comp):
-                            comp = p0
-                    else:
-                        tit = f"{p0} - {p1}"
-                    break
-                elif len(valid_parts) == 2:
-                    p0, p1 = valid_parts[0], valid_parts[1]
-                    p0_has_role = _has_role_keyword(p0)
-                    p1_has_role = _has_role_keyword(p1)
-
-                    if p0_has_role and not p1_has_role:
-                        tit = p0
-                        if not comp or _is_invalid_company(comp):
-                            comp = p1
-                    elif p1_has_role and not p0_has_role:
-                        tit = p1
-                        if not comp or _is_invalid_company(comp):
-                            comp = p0
-                    elif p0_has_role and p1_has_role:
-                        tit = f"{p0} - {p1}"
-                    else:
-                        if not comp or _is_invalid_company(comp):
-                            comp = p0
-                        tit = p1
-                    break
-                elif len(valid_parts) == 1:
-                    tit = valid_parts[0]
-                    break
-
-        # Handle "Role at Company" pattern
-        if " at " in tit.lower():
-            at_idx = tit.lower().find(" at ")
-            left_part = tit[:at_idx].strip()
-            right_part = tit[at_idx + 4:].strip()
-            if _has_role_keyword(left_part):
-                tit = left_part
-                if not comp and not _is_invalid_company(right_part):
-                    comp = right_part
-
-        # Fallback company from URL
-        if not comp or _is_invalid_company(comp):
-            if ats_company:
-                comp = ats_company
-            elif u:
-                try:
-                    parsed = urlparse(u)
-                    netloc = parsed.netloc.lower()
-                    if not is_platform_url(u):
-                        domain_parts = netloc.replace("www.", "").replace("careers.", "").replace("jobs.", "").split(".")
-                        if domain_parts and domain_parts[0] and domain_parts[0] not in ("com", "org", "net"):
-                            comp = domain_parts[0].capitalize()
-                except Exception:
-                    pass
-
-        if _is_invalid_company(comp):
-            comp = ats_company or "Tech Company"
-
-        # Strip company name from title if duplicate
-        for sep in [" - ", " | ", ": ", " – "]:
-            prefix = f"{comp}{sep}"
-            if tit.lower().startswith(prefix.lower()):
-                tit = tit[len(prefix):].strip()
-            suffix = f"{sep}{comp}"
-            if tit.lower().endswith(suffix.lower()):
-                tit = tit[:-len(suffix)].strip()
-
-        # Remove platform noise from title
-        for p in PLATFORM_NAMES:
-            tit = re.sub(rf"\s*[-|–]\s*{re.escape(p)}\b.*$", "", tit, flags=re.IGNORECASE).strip()
-
-        return comp, tit
-
-    # Extract, filter, and deduplicate discovered job roles
-    all_candidate_jobs: List[Dict[str, Any]] = []
-
-    # 1. From verified fetched articles
-    for art in agent.fetched_articles:
-        if art.get("status") == "fetched":
-            u = art.get("url") or art.get("current_url") or ""
-            # Defect 3: Filter non-leaf URLs
-            is_leaf, _ = SemanticMemory.is_leaf_job_url(u)
-            if not is_leaf:
-                continue
-
-            content = art.get("content") or ""
-            # Defect 3: Verify content singularity (reject multi-job lists)
-            is_single, _ = SemanticMemory.validate_content_singularity(content, art.get("title") or "")
-            if not is_single:
-                continue
-
-            comp, title = _extract_company_and_title(art.get("title") or "Verified Machine Learning Engineer", art.get("company"), u)
-            loc = art.get("location") or extract_location_from_text(content) or "Remote / Hybrid"
-            compensation = art.get("compensation") or extract_compensation_from_text(content) or "Disclosed in application portal"
-            all_candidate_jobs.append({
-                "title": title,
-                "company": comp,
-                "url": u,
-                "location": loc,
-                "snippet": content[:400],
-                "compensation": compensation
-            })
-
-    # 2. From candidate discovery search hits
-    for job in agent.extracted_jobs:
-        u = job.get("url") or job.get("apply_url") or ""
-        # Defect 3: Filter non-leaf URLs
-        is_leaf, _ = SemanticMemory.is_leaf_job_url(u)
-        if not is_leaf:
-            continue
-
-        snippet = job.get("snippet") or ""
-        # Defect 3: Verify content singularity
-        is_single, _ = SemanticMemory.validate_content_singularity(snippet, job.get("title") or "")
-        if not is_single:
-            continue
-
-        comp, title = _extract_company_and_title(job.get("title") or "AI/ML Role", job.get("company"), u)
-        loc = job.get("location") or extract_location_from_text(snippet) or "Remote"
-        compensation = job.get("compensation") or job.get("salary") or extract_compensation_from_text(snippet) or ""
-        all_candidate_jobs.append({
-            "title": title,
-            "company": comp,
-            "url": u,
-            "location": loc,
-            "snippet": snippet,
-            "compensation": compensation
-        })
-
-    # 3. From working memory verified roles
-    if hasattr(agent, "working_memory") and agent.working_memory:
-        for job in agent.working_memory.verified_jobs:
-            u = job.get("url") or job.get("canonical_url") or ""
-            # Defect 3: Filter non-leaf URLs
-            is_leaf, _ = SemanticMemory.is_leaf_job_url(u)
-            if not is_leaf:
-                continue
-
-            snippet = job.get("snippet") or "Verified active role."
-            comp, title = _extract_company_and_title(job.get("title") or "Verified AI/ML Role", job.get("company"), u)
-            loc = job.get("location") or extract_location_from_text(snippet) or "Remote / Hybrid"
-            compensation = job.get("compensation") or extract_compensation_from_text(snippet) or "Disclosed in application portal"
-            all_candidate_jobs.append({
-                "title": title,
-                "company": comp,
-                "url": u,
-                "location": loc,
-                "snippet": snippet,
-                "compensation": compensation
-            })
-
-    # Deduplicate candidate openings
-    deduplicator = JobDeduplicator(llm_client=agent.llm)
-    deduped_jobs = deduplicator.deduplicate_job_list(all_candidate_jobs)
-
-    # Filter to only positions with valid http(s) URLs and non-empty titles
-    valid_jobs = [
-        j for j in deduped_jobs
-        if j.get("url", "").startswith("http") and j.get("title")
-    ]
-
-    current_top_k = valid_jobs[:config.K]
-    # Defect 2: Explicitly inject sequential 1-based rank into each item
-    for idx, job in enumerate(current_top_k, 1):
-        job["rank"] = idx
-
-    status = result["status"]
-    if len(current_top_k) >= config.K and status in ("running", "partial") and (result.get("halt_reason") or "").startswith("Maximum step budget"):
-        status = "complete"
-        result["status"] = "complete"
-
-    telemetry = {
-        "status": status,
-        "halt_reason": result["halt_reason"] if status != "complete" else None,
-        "step_count": result["step_count"],
-        "fetch_count": result["fetch_count"],
-        "tokens_spent": result["tokens_spent"]
-    }
-
-    # Generate Reports
-    if run_number == 1:
-        report_content = generate_run1_report(
-            jobs=current_top_k,
-            trace=result["trace"],
-            metadata=telemetry
-        )
-        rep_path, trace_path = save_report_and_trace(
-            report_content=report_content,
-            trace_data=result["trace"],
-            run_number=1,
-            reports_dir=reports_dir
-        )
-        # Save memory state
-        memory_manager.save_state(
-            run_number=1,
-            visited_urls=set(result["visited_urls"]),
-            top_k_jobs=current_top_k,
-            metadata=telemetry
-        )
-    else:
-        # Run 2: Classify against Run 1 findings
-        classified = memory_manager.classify_multi_run_developments(
-            previous_top_k=prior_top_k,
-            current_top_k=current_top_k
-        )
-        report_content = generate_run2_report(
-            classified=classified,
-            trace=result["trace"],
-            metadata=telemetry
-        )
-        rep_path, trace_path = save_report_and_trace(
-            report_content=report_content,
-            trace_data=result["trace"],
-            run_number=run_number,
-            reports_dir=reports_dir
-        )
-        # Save accumulated memory state
-        memory_manager.save_state(
-            run_number=run_number,
-            visited_urls=set(result["visited_urls"]),
-            top_k_jobs=current_top_k,
-            metadata=telemetry
-        )
-
-    # Optional backend database sync if authenticated
-    if jwt_token:
-        backend_payload = {
-            "run_number": run_number,
-            "topic": config.topic,
-            "target_k": config.K,
-            "status": result["status"],
-            "step_count": result["step_count"],
-            "fetch_count": result["fetch_count"],
-            "tokens_spent": result["tokens_spent"],
-            "report_path": str(rep_path),
-            "trace_path": str(trace_path),
-            "jobs": current_top_k,
-            "articles": agent.fetched_articles
-        }
-        sync_run_to_backend(jwt_token, b_url, backend_payload)
-
-    print("\n" + "=" * 60)
-    print(f"  TRACKER [RUN {run_number}] EXECUTION FINISHED")
-    print("=" * 60)
-    print(f"Status:        {result['status'].upper()}")
-    print(f"Steps Taken:   {result['step_count']} / {config.limits.max_steps}")
-    print(f"Fetches:       {result['fetch_count']} / {config.limits.max_fetches}")
-    print(f"Tokens Spent:  {result['tokens_spent']:,} / {config.limits.token_budget:,}")
-    print(f"Top K Roles:   {len(current_top_k)}")
-    print(f"Report File:   {rep_path}")
-    print(f"Trace File:    {trace_path}")
-    print("=" * 60 + "\n")
+    # 5. Display terminal summary
+    format_and_display_run(run_data)
 
     return {
+        "run_id": run_id,
+        "run_uuid": run_uuid,
         "run_number": run_number,
-        "status": result["status"],
-        "top_k_count": len(current_top_k),
-        "report_path": str(rep_path),
-        "trace_path": str(trace_path)
+        "status": run_data.get("status", "complete"),
+        "top_k_count": len(run_data.get("developments", [])),
+        "report_path": run_data.get("report_path"),
+        "trace_path": run_data.get("trace_path"),
     }
 
 
 def main():
     parser = argparse.ArgumentParser(
         prog="python -m tracker.run",
-        description="Autonomous Agentic Tracker for Top 10 newest entry-level and new grad AI/ML roles."
+        description="Authenticated Client for Autonomous Agentic Tracker.",
     )
     parser.add_argument(
         "--reset",
         action="store_true",
-        help="Wipe prior recrawl state and execute as clean Run 1"
+        help="Start a fresh scoped comparison lineage on backend without deleting history",
     )
     parser.add_argument(
         "--steps",
         type=int,
         default=None,
-        help="Override maximum step limit for test runs"
+        help="Override step limit (can only reduce total configured allowance)",
     )
     parser.add_argument(
         "--username",
         type=str,
         default=None,
-        help="A1 Platform username for authenticated reporting"
+        help="A1 Platform username for authenticated reporting",
     )
     parser.add_argument(
         "--password",
         type=str,
         default=None,
-        help="A1 Platform password"
+        help="A1 Platform password",
     )
     parser.add_argument(
         "--backend-url",
         type=str,
         default=None,
-        help="A1 Backend API base URL (default: http://localhost:8000)"
+        help="A1 Backend API base URL (default: http://localhost:8000)",
+    )
+    parser.add_argument(
+        "--token",
+        type=str,
+        default=None,
+        help="Direct JWT bearer token for backend authentication",
     )
     parser.add_argument(
         "--skip-login",
         action="store_true",
-        help="Skip backend authentication and execute standalone"
+        help="[Deprecated] Standalone local model execution is removed; flag is ignored or rejected",
     )
 
     args = parser.parse_args()
-    run_tracker(
-        reset=args.reset,
-        steps_override=args.steps,
-        username=args.username,
-        password=args.password,
-        backend_url=args.backend_url,
-        skip_login=args.skip_login
-    )
+
+    if args.skip_login:
+        logger.warning(
+            "Flag --skip-login is deprecated. Standalone local model execution is disabled; "
+            "all runs are orchestrated through the backend."
+        )
+
+    try:
+        run_tracker(
+            reset=args.reset,
+            steps_override=args.steps,
+            username=args.username,
+            password=args.password,
+            backend_url=args.backend_url,
+            token=args.token,
+        )
+    except Exception as e:
+        logger.error(f"Tracker execution failed: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -192,6 +192,7 @@ class TrackerRunResponse(BaseModel):
     reset_generation: int = 0
     stale_source_run_id: Optional[int] = None
     stale_source_run_uuid: Optional[str] = None
+    stale_source_created_at: Optional[datetime] = None
     step_count: int
     fetch_count: int
     tokens_spent: int

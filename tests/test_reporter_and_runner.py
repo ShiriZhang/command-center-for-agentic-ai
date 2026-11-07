@@ -124,47 +124,38 @@ class TestReporterAndRunner(unittest.TestCase):
 
     def test_run_tracker_lifecycle(self):
         """
-        Verify that run_tracker executes with mock agent and creates reports.
+        Verify that run_tracker executes as authenticated client with backend trigger and poll.
         """
-        mock_agent_result = {
+        mock_trigger = {
+            "status": "triggered",
+            "message": "Run queued",
+            "run_id": 10,
+            "run_uuid": "00000000-0000-0000-0000-000000000001",
+            "run_number": 1,
+        }
+        mock_poll = {
+            "id": 10,
+            "run_uuid": "00000000-0000-0000-0000-000000000001",
+            "run_number": 1,
             "status": "complete",
-            "halt_reason": None,
-            "step_count": 2,
-            "fetch_count": 1,
-            "tokens_spent": 500,
-            "report": "Mock synthesized report",
-            "visited_urls": ["https://boards.greenhouse.io/anduril/1"],
-            "trace": [
-                {"step": 1, "action": "finish", "action_input": {}, "observation": "done"}
-            ]
+            "report_path": "reports/run_1_report.md",
+            "trace_path": "reports/trace_1.jsonl",
+            "developments": [],
+            "articles": [],
         }
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmp_path = Path(tmpdir)
-            tmp_state = tmp_path / "test_state.json"
-            with patch("tracker.run.ResearchAgent.run", return_value=mock_agent_result), \
-                 patch("tracker.run.authenticate_user", return_value=None):
-                # Test Run 1 with reset
-                res1 = run_tracker(
-                    reset=True,
-                    steps_override=2,
-                    skip_login=True,
-                    reports_dir=tmp_path,
-                    state_file=tmp_state
-                )
-                self.assertEqual(res1["run_number"], 1)
-                self.assertTrue(Path(res1["report_path"]).exists())
-
-                # Test Run 2 immediately after
-                res2 = run_tracker(
-                    reset=False,
-                    steps_override=2,
-                    skip_login=True,
-                    reports_dir=tmp_path,
-                    state_file=tmp_state
-                )
-                self.assertEqual(res2["run_number"], 2)
-                self.assertTrue(Path(res2["report_path"]).exists())
+        with patch("tracker.run.authenticate_user", return_value="jwt-tok"), \
+             patch("tracker.run.trigger_tracker_run", return_value=mock_trigger), \
+             patch("tracker.run.poll_tracker_run", return_value=mock_poll):
+            res = run_tracker(
+                reset=True,
+                steps_override=2,
+                token="jwt-tok",
+                poll_interval=0.01,
+            )
+            self.assertEqual(res["run_number"], 1)
+            self.assertEqual(res["status"], "complete")
+            self.assertEqual(res["run_id"], 10)
 
 
 if __name__ == "__main__":
